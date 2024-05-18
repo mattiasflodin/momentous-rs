@@ -192,7 +192,7 @@ fn load_leap_segments() -> Vec<ContinuousTimeSegment> {
     let tz = parse(data).expect("failed to parse zoneinfo file");
 
     let mut segments: Vec<ContinuousTimeSegment> = Vec::with_capacity(tz.leap_seconds.len());
-    let mut start_instant: InstantS32 = Instant::new(0);
+    let mut start_instant: InstantS32 = Instant::from_ticks_since_epoch(0);
     let mut start_day = 0;
     let mut previous_leap_second_total = 0;
     for leap_second in tz.leap_seconds.iter() {
