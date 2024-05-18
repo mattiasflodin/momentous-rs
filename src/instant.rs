@@ -54,15 +54,15 @@ impl<T: Tick, S: Scale> Instant<T, S> {
         }
     }
 
-    pub(crate) fn new(instant_value: T) -> Self {
+    pub fn from_ticks_since_epoch(ticks: T) -> Self {
         Self {
-            ticks: instant_value,
+            ticks,
             phantom: PhantomData,
         }
     }
 
     pub fn epoch() -> Self {
-        Instant::new(T::zero())
+        Instant::from_ticks_since_epoch(T::zero())
     }
 
     // Can't implement TryFrom trait because of the blanket specialization in core.
@@ -73,7 +73,7 @@ impl<T: Tick, S: Scale> Instant<T, S> {
         T2: TryInto<T>,
     {
         let ticks = value.ticks.try_into().map_err(|_| InstantOutOfRange)?;
-        Ok(Instant::new(ticks))
+        Ok(Instant::from_ticks_since_epoch(ticks))
     }
 
     // TODO maybe use the error type from TryInto instead
@@ -83,7 +83,7 @@ impl<T: Tick, S: Scale> Instant<T, S> {
         T: TryInto<T2>,
     {
         let ticks = self.ticks.try_into().map_err(|_| InstantOutOfRange)?;
-        Ok(Instant::new(ticks))
+        Ok(Instant::from_ticks_since_epoch(ticks))
     }
 
     pub fn into<T2>(self) -> Instant<T2, S>
@@ -91,14 +91,14 @@ impl<T: Tick, S: Scale> Instant<T, S> {
         T2: Tick,
         T: Into<T2>,
     {
-        Instant::new(self.ticks.into())
+        Instant::from_ticks_since_epoch(self.ticks.into())
     }
 
     pub fn widen<T2: Tick>(self) -> Instant<<T as Widen<T2>>::Output, S>
     where
         T: Widen<T2>,
     {
-        Instant::new(self.ticks.widen())
+        Instant::from_ticks_since_epoch(self.ticks.widen())
     }
 
     pub fn floor<S2: Scale>(&self) -> Instant<T, S2> {
@@ -107,7 +107,7 @@ impl<T: Tick, S: Scale> Instant<T, S> {
             "Cannot floor scale to a higher scale"
         );
         let factor = T::from(S::TICKS_PER_SECOND).unwrap() / T::from(S2::TICKS_PER_SECOND).unwrap();
-        Instant::new(self.ticks.div_floor(&factor))
+        Instant::from_ticks_since_epoch(self.ticks.div_floor(&factor))
     }
 
     pub fn split<S2: Scale>(&self) -> (Instant<T, S2>, Duration<T, S>) {
@@ -117,7 +117,10 @@ impl<T: Tick, S: Scale> Instant<T, S> {
         );
         let factor = T::from(S::TICKS_PER_SECOND).unwrap() / T::from(S2::TICKS_PER_SECOND).unwrap();
         let (ticks, remainder) = self.ticks.div_mod_floor(&factor);
-        (Instant::new(ticks), Duration::new(remainder))
+        (
+            Instant::from_ticks_since_epoch(ticks),
+            Duration::new(remainder),
+        )
     }
 
     pub fn extend<T2: Tick, S2: Scale>(&self) -> Option<Instant<T2, S2>> {
@@ -129,11 +132,15 @@ impl<T: Tick, S: Scale> Instant<T, S> {
         let factor =
             T2::from(S2::TICKS_PER_SECOND).unwrap() / T2::from(S::TICKS_PER_SECOND).unwrap();
         let ticks = ticks.checked_mul(&factor)?;
-        Some(Instant::new(ticks))
+        Some(Instant::from_ticks_since_epoch(ticks))
     }
 
     pub fn duration_since_epoch(&self) -> Duration<T, S> {
         Duration::new(self.ticks)
+    }
+
+    pub fn ticks_since_epoch(&self) -> T {
+        self.ticks
     }
 }
 
@@ -153,7 +160,7 @@ impl<T: Tick, S: Scale> Add<Duration<T, S>> for Instant<T, S> {
     type Output = Self;
 
     fn add(self, rhs: Duration<T, S>) -> Self::Output {
-        Self::new(
+        Self::from_ticks_since_epoch(
             self.ticks
                 .checked_add(&rhs.ticks())
                 .expect("instant addition overflow"),

@@ -539,7 +539,7 @@ mod tests {
         // i.e. the zero point used in the implementation of GregorianNormalizedDate which is used in
         // the implementation of from_instant.
         let date_time = DateTime::from_instant(
-            InstantNs128::new((11017 * 24 * 60 * 60 + 22) * 1_000_000_000),
+            InstantNs128::from_ticks_since_epoch((11017 * 24 * 60 * 60 + 22) * 1_000_000_000),
             &chronology,
         )
         .unwrap();
@@ -555,7 +555,7 @@ mod tests {
 
         // One nanosecond earlier than above.
         let date_time = DateTime::from_instant(
-            InstantNs128::new((11017 * 24 * 60 * 60 + 22) * 1_000_000_000 - 1),
+            InstantNs128::from_ticks_since_epoch((11017 * 24 * 60 * 60 + 22) * 1_000_000_000 - 1),
             &chronology,
         )
         .unwrap();
@@ -570,7 +570,8 @@ mod tests {
         assert_eq!(date_time.nanosecond, 999);
 
         // Unix epoch.
-        let date_time = DateTime::from_instant(InstantNs128::new(0), &chronology).unwrap();
+        let date_time =
+            DateTime::from_instant(InstantNs128::from_ticks_since_epoch(0), &chronology).unwrap();
         assert_eq!(date_time.year, 1970);
         assert_eq!(date_time.month, 1);
         assert_eq!(date_time.day, 1);
@@ -582,7 +583,8 @@ mod tests {
         assert_eq!(date_time.nanosecond, 0);
 
         // One nanosecond before unix epoch.
-        let date_time = DateTime::from_instant(InstantNs128::new(-1), &chronology).unwrap();
+        let date_time =
+            DateTime::from_instant(InstantNs128::from_ticks_since_epoch(-1), &chronology).unwrap();
         assert_eq!(date_time.year, 1969);
         assert_eq!(date_time.month, 12);
         assert_eq!(date_time.day, 31);
@@ -595,7 +597,7 @@ mod tests {
 
         // Introduction of the Gregorian calendar. 141427 days before unix epoch.
         let date_time = DateTime::from_instant(
-            InstantNs128::new(-141427 * 24 * 60 * 60 * 1_000_000_000),
+            InstantNs128::from_ticks_since_epoch(-141427 * 24 * 60 * 60 * 1_000_000_000),
             &chronology,
         )
         .unwrap();
@@ -611,7 +613,7 @@ mod tests {
 
         // Second before 1990 leap second
         let date_time = DateTime::from_instant(
-            InstantNs128::new((7670 * 24 * 60 * 60 + 14) * 1_000_000_000),
+            InstantNs128::from_ticks_since_epoch((7670 * 24 * 60 * 60 + 14) * 1_000_000_000),
             &chronology,
         )
         .unwrap();
@@ -627,7 +629,7 @@ mod tests {
 
         // 1990 leap second.
         let date_time = DateTime::from_instant(
-            InstantNs128::new((7670 * 24 * 60 * 60 + 15) * 1_000_000_000),
+            InstantNs128::from_ticks_since_epoch((7670 * 24 * 60 * 60 + 15) * 1_000_000_000),
             &chronology,
         )
         .unwrap();
@@ -643,7 +645,7 @@ mod tests {
 
         // Second after 1990 leap second.
         let date_time = DateTime::from_instant(
-            InstantNs128::new((7670 * 24 * 60 * 60 + 16) * 1_000_000_000),
+            InstantNs128::from_ticks_since_epoch((7670 * 24 * 60 * 60 + 16) * 1_000_000_000),
             &chronology,
         )
         .unwrap();
