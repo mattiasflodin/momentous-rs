@@ -1,3 +1,4 @@
+use num_integer::Integer;
 use std::cmp::min;
 
 use num_traits::PrimInt;
@@ -40,54 +41,24 @@ impl<T: PrimInt> RemFloor for T {
     }
 }
 
-pub(crate) trait DivRemFloor: Sized {
-    fn div_rem_floor(&self, other: Self) -> (Self, Self);
-}
-
-impl<T: PrimInt> DivRemFloor for T {
-    fn div_rem_floor(&self, other: Self) -> (Self, Self) {
-        let zero = Self::zero();
-        let one = Self::one();
-        if *self > zero && other < zero {
-            let (q, r) = (*self - one).div_rem(other);
-            (q - one, r + other + one)
-        } else if *self < zero && other > zero {
-            let (q, r) = (*self + one).div_rem(other);
-            (q - one, r + other - one)
-        } else {
-            (*self).div_rem(other)
-        }
-    }
-}
-
 pub(crate) trait DivRemCeil: Sized {
-    fn div_rem_ceil(&self, other: Self) -> (Self, Self);
+    fn div_rem_ceil(&self, other: &Self) -> (Self, Self);
 }
 
-impl<T: PrimInt> DivRemCeil for T {
+impl<T: Integer + Copy> DivRemCeil for T {
     // TODO test this
-    fn div_rem_ceil(&self, other: Self) -> (Self, Self) {
+    fn div_rem_ceil(&self, other: &Self) -> (Self, Self) {
         let zero = Self::zero();
         let one = Self::one();
-        if *self > zero && other < zero {
+        if *self > zero && *other < zero {
             let (q, r) = (*self - one).div_rem(other);
-            (q - one, r + other - one)
-        } else if *self < zero && other > zero {
+            (q - one, r + *other - one)
+        } else if *self < zero && *other > zero {
             let (q, r) = (*self + one).div_rem(other);
-            (q - one, r + other + one)
+            (q - one, r + *other + one)
         } else {
             (*self).div_rem(other)
         }
-    }
-}
-
-pub(crate) trait DivRem: Sized {
-    fn div_rem(&self, other: Self) -> (Self, Self);
-}
-
-impl<T: PrimInt> DivRem for T {
-    fn div_rem(&self, other: Self) -> (Self, Self) {
-        (*self / other, *self % other)
     }
 }
 
@@ -95,7 +66,7 @@ pub(crate) trait MulDivRemFloor: Sized {
     fn mul_div_rem_floor(&self, multiplier: Self, divisor: Self) -> (Self, Self);
 }
 
-impl<T: PrimInt> MulDivRemFloor for T {
+impl<T: Integer + Copy> MulDivRemFloor for T {
     fn mul_div_rem_floor(&self, multiplier: Self, divisor: Self) -> (Self, Self) {
         // We want to compute the quotient and remainder of (a*b)/c, but
         // without computing the intermediate value a*b since it might overflow.
@@ -134,9 +105,9 @@ impl<T: PrimInt> MulDivRemFloor for T {
         let a = *self;
         let b = multiplier;
         let c = divisor;
-        let (q_a, r_a) = a.div_rem_floor(c);
-        let (q_b, r_b) = b.div_rem_floor(c);
-        let (q_c, r_c) = (r_a * r_b).div_rem_floor(c);
+        let (q_a, r_a) = a.div_mod_floor(&c);
+        let (q_b, r_b) = b.div_mod_floor(&c);
+        let (q_c, r_c) = (r_a * r_b).div_mod_floor(&c);
         (q_a * b + r_a * q_b + q_c, r_c)
     }
 }
@@ -149,16 +120,16 @@ pub(crate) trait MulDivRemCeil: Sized {
     fn mul_div_rem_ceil(&self, multiplier: Self, divisor: Self) -> (Self, Self);
 }
 
-impl<T: PrimInt> MulDivRemCeil for T {
+impl<T: Integer + Copy> MulDivRemCeil for T {
     fn mul_div_rem_ceil(&self, multiplier: Self, divisor: Self) -> (Self, Self) {
         // This is exactly the same as MulDivRemFloor, but we use div_rem_ceil
         // instead of div_rem_floor.
         let a = self;
         let b = multiplier;
         let c = divisor;
-        let (q_a, r_a) = a.div_rem_ceil(c);
-        let (q_b, r_b) = b.div_rem_ceil(c);
-        let (q_c, r_c) = (r_a * r_b).div_rem_ceil(c);
+        let (q_a, r_a) = a.div_rem_ceil(&c);
+        let (q_b, r_b) = b.div_rem_ceil(&c);
+        let (q_c, r_c) = (r_a * r_b).div_rem_ceil(&c);
         (q_a * b + r_a * q_b + q_c, r_c)
     }
 }

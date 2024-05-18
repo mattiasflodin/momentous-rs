@@ -1,13 +1,13 @@
 use std::convert::TryInto;
 use std::sync::Arc;
 
+use num_integer::Integer;
 use num_traits::NumCast;
 use numcmp::NumCmp;
 use zoneinfo_compiled::TZData;
 
 use crate::cursor::Cursor;
 use crate::div_rem::ClampedDivRem;
-use crate::div_rem::DivRem;
 use crate::duration::DurationS64;
 use crate::gregorian_normalized_date::GregorianNormalizedDate;
 use crate::instant::Tick;
@@ -157,12 +157,12 @@ impl Chronology {
                 // to allow for the leap seconds.
                 // TODO test negative leap seconds
                 let (second, nanoseconds_into_second) =
-                    nanoseconds_into_minute.div_rem(1_000_000_000);
+                    nanoseconds_into_minute.div_rem(&1_000_000_000);
                 let nanoseconds_into_second = nanoseconds_into_second as u32; // 2^30 nanoseconds per second
                 let (millisecond, nanoseconds_into_millisecond) =
-                    nanoseconds_into_second.div_rem(1_000_000);
+                    nanoseconds_into_second.div_rem(&1_000_000);
                 let (microsecond, nanoseconds_into_microsecond) =
-                    nanoseconds_into_millisecond.div_rem(1_000);
+                    nanoseconds_into_millisecond.div_rem(&1_000);
                 let nanosecond = nanoseconds_into_microsecond as u16;
                 (
                     hour,
