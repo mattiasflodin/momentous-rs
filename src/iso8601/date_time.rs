@@ -6,6 +6,7 @@ use crate::iso8601::DateTimeBuilder;
 use crate::shared_vec_cursor::SharedVecCursor;
 use crate::zoneinfo::{get_leap_seconds, ContinuousTimeSegment};
 
+#[derive(Debug, Clone)]
 pub struct Carry {
     days: u128,
     seconds: u128,
@@ -17,6 +18,7 @@ impl Carry {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct DateTimeWithCarry(DateTime, Carry);
 
 impl DateTimeWithCarry {
@@ -53,6 +55,7 @@ impl DateTimeWithCarry {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct DateTime {
     chronology: Chronology,
     precision: Precision,

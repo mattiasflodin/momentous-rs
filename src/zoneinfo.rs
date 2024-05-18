@@ -75,6 +75,7 @@ pub(crate) fn get_leap_seconds() -> LeapSecondChronology {
 }
 
 /// A segment of time that ends with a leap second adjustment on the last day.
+#[derive(Debug)]
 pub(crate) struct ContinuousTimeSegment {
     /// Instant at which this segment starts.
     pub(crate) start_instant: Instant<i32, Seconds>,

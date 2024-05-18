@@ -26,6 +26,7 @@
 use crate::div_rem::ClampedDivRem;
 use num_integer::Integer;
 
+#[derive(Debug, Clone)]
 pub(crate) struct GregorianNormalizedDate {
     // Number of 400-year cycles since 2000-03-01.
     cycle: i128,
