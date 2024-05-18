@@ -23,7 +23,8 @@
 // - 2398-03-01 to 2399-02-28
 // - 2399-03-01 to 2400-02-29
 
-use crate::div_rem::{ClampedDivRem, DivRem, DivRemFloor};
+use crate::div_rem::ClampedDivRem;
+use num_integer::Integer;
 
 pub(crate) struct GregorianNormalizedDate {
     // Number of 400-year cycles since 2000-03-01.
@@ -63,7 +64,7 @@ fn month_from_day_offset(day: u16) -> u8 {
 impl GregorianNormalizedDate {
     pub(crate) fn from_day(day: i128) -> Self {
         let day = day - GREGORIAN_NORMALIZED_DATE_OFFSET_DAYS as i128;
-        let (cycle, days_into_cycle) = day.div_rem_floor(GREGORIAN_CYCLE_DAYS as i128);
+        let (cycle, days_into_cycle) = day.div_mod_floor(&(GREGORIAN_CYCLE_DAYS as i128));
         let days_into_cycle = days_into_cycle as u32; // 2^18 days per cycle
 
         // The first three centuries of each cycle are normal centuries with 24 leap years and 76 normal years.
@@ -77,7 +78,7 @@ impl GregorianNormalizedDate {
         // quadrennium of the first three centuries are exceptional since they lack the leap day, so they have one
         // day less. This means we can do a normal division (without clamped quotient).
         let (quadrennium, days_into_quadrennium) =
-            days_into_century.div_rem(GREGORIAN_QUADRENNIUM_DAYS);
+            days_into_century.div_rem(&GREGORIAN_QUADRENNIUM_DAYS);
         let quadrennium = quadrennium as u8;
 
         let (years_into_quadrennium, days_into_year) =
@@ -119,7 +120,7 @@ impl GregorianNormalizedDate {
         }
         month -= 2;
         year -= 2000;
-        let (cycle, years_into_cycle) = year.div_rem_floor(GREGORIAN_CYCLE_YEARS as i128);
+        let (cycle, years_into_cycle) = year.div_mod_floor(&(GREGORIAN_CYCLE_YEARS as i128));
         let years_into_cycle = years_into_cycle as u16; // 2^9 years per cycle
         let (century, years_into_century) =
             years_into_cycle.clamped_div_rem(GREGORIAN_CENTURY_YEARS as u16, 3_u8);
