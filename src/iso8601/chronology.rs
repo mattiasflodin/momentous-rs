@@ -8,7 +8,7 @@ use zoneinfo_compiled::TZData;
 use crate::cursor::Cursor;
 use crate::div_rem::ClampedDivRem;
 use crate::div_rem::DivRem;
-use crate::duration::{DurationMs128, DurationS128, DurationS64};
+use crate::duration::DurationS64;
 use crate::gregorian_normalized_date::GregorianNormalizedDate;
 use crate::instant::Tick;
 use crate::iso8601::DateTime;
@@ -17,7 +17,7 @@ use crate::widen::Widen;
 use crate::zoneinfo::{
     get_leap_second_segments_since_day, get_leap_seconds, ContinuousTimeSegment,
 };
-use crate::{zoneinfo, Duration, DurationNs128, Instant, Nanoseconds, Scale};
+use crate::{zoneinfo, Duration, Instant, Nanoseconds, Scale};
 
 #[derive(Debug, Clone)]
 pub struct Chronology {
