@@ -1,11 +1,14 @@
 use std::num::NonZeroUsize;
 
-pub trait Cursor: Iterator {
+pub trait Cursor {
+    type Item: ?Sized;
+
+    fn next(&mut self) -> Option<&Self::Item>;
     fn advance_by(&mut self, n: usize) -> Result<(), NonZeroUsize>;
-    fn prev(&mut self) -> Option<Self::Item>;
-    fn current(&self) -> Option<Self::Item>;
-    fn peek_next(&self) -> Option<Self::Item>;
-    fn peek_prev(&self) -> Option<Self::Item>;
+    fn prev(&mut self) -> Option<&Self::Item>;
+    fn current(&self) -> Option<&Self::Item>;
+    fn peek_next(&self) -> Option<&Self::Item>;
+    fn peek_prev(&self) -> Option<&Self::Item>;
     fn revert_by(&mut self, n: usize) -> Result<(), NonZeroUsize>;
     fn at_start(&self) -> bool;
     fn at_end(&self) -> bool;

@@ -41,9 +41,9 @@ impl<'a, T> SliceCursor<'a, T> {
     }
 }
 
-impl<'a, T> Iterator for SliceCursor<'a, T> {
-    type Item = &'a T;
-    fn next(&mut self) -> Option<Self::Item> {
+impl<'a, T> Cursor for SliceCursor<'a, T> {
+    type Item = T;
+    fn next(&mut self) -> Option<&Self::Item> {
         let end = self.slice.len() + 1;
         if self.pos < end {
             self.pos += 1;
@@ -56,20 +56,6 @@ impl<'a, T> Iterator for SliceCursor<'a, T> {
             None
         }
     }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        if self.pos == 0 {
-            (self.slice.len(), Some(self.slice.len()))
-        } else if self.pos == self.slice.len() + 1 {
-            (0, Some(0))
-        } else {
-            let remaining = self.slice.len() - self.pos;
-            (remaining, Some(remaining))
-        }
-    }
-}
-
-impl<'a, T> Cursor for SliceCursor<'a, T> {
     fn advance_by(&mut self, n: usize) -> Result<(), NonZeroUsize> {
         let remaining = self.slice.len() - self.pos;
         let advance = min(n, remaining);
@@ -82,7 +68,7 @@ impl<'a, T> Cursor for SliceCursor<'a, T> {
         }
     }
 
-    fn prev(&mut self) -> Option<Self::Item> {
+    fn prev(&mut self) -> Option<&Self::Item> {
         if self.pos > 0 {
             self.pos -= 1;
             if self.pos > 0 {
@@ -95,7 +81,7 @@ impl<'a, T> Cursor for SliceCursor<'a, T> {
         }
     }
 
-    fn current(&self) -> Option<Self::Item> {
+    fn current(&self) -> Option<&Self::Item> {
         if self.pos > 0 && self.pos <= self.slice.len() {
             Some(&self.slice[self.pos - 1])
         } else {
@@ -103,7 +89,7 @@ impl<'a, T> Cursor for SliceCursor<'a, T> {
         }
     }
 
-    fn peek_next(&self) -> Option<Self::Item> {
+    fn peek_next(&self) -> Option<&Self::Item> {
         if self.pos < self.slice.len() {
             Some(&self.slice[self.pos])
         } else {
@@ -111,7 +97,7 @@ impl<'a, T> Cursor for SliceCursor<'a, T> {
         }
     }
 
-    fn peek_prev(&self) -> Option<Self::Item> {
+    fn peek_prev(&self) -> Option<&Self::Item> {
         if self.pos > 1 {
             Some(&self.slice[self.pos - 1 - 1])
         } else {
