@@ -1,3 +1,1 @@
-trait DateTime {
-}
-
+trait DateTime {}

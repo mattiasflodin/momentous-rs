@@ -1,7 +1,7 @@
 use crate::instant::Tick;
 
 // Widen self into T. Output is whichever is the wider of the two types.
-pub(crate) trait Widen<T: Tick>: Tick {
+pub trait Widen<T: Tick>: Tick {
     type Output: Tick;
     fn widen(self) -> <Self as Widen<T>>::Output;
 }
@@ -31,7 +31,6 @@ macro_rules! widen_noop {
         )+
     }
 }
-
 
 widen!(u8, u16, u32, u64, u128, i16, i32, i64, i128);
 widen!(u16, u32, u64, u128, i32, i64, i128);

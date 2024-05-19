@@ -2,15 +2,17 @@ use std::hash::Hash;
 use std::marker::PhantomData;
 use std::ops::{Add, Sub};
 use std::time::SystemTime;
+
 use num_integer::Integer;
-use num_traits::{Bounded, PrimInt, Signed};
+use num_traits::{Bounded, PrimInt};
 use numcmp::NumCmp;
 use thiserror::Error;
-use crate::{Duration, Scale};
-use crate::Nanoseconds;
+
 use crate::scale::Seconds;
-use crate::zoneinfo::{get_leap_second_adjustment, get_leap_seconds};
 use crate::widen::Widen;
+use crate::zoneinfo::get_leap_second_adjustment;
+use crate::Nanoseconds;
+use crate::{Duration, Scale};
 
 pub trait Tick: PrimInt + Bounded + Hash + Eq + Copy + Ord + PartialOrd + Integer {}
 
@@ -39,15 +41,24 @@ pub type InstantNs128 = Instant<i128, Nanoseconds>;
 
 impl<T: Tick, S: Scale> Instant<T, S> {
     pub fn min_value() -> Self {
-        Instant { ticks: T::min_value(), phantom: PhantomData }
+        Instant {
+            ticks: T::min_value(),
+            phantom: PhantomData,
+        }
     }
 
     pub fn max_value() -> Self {
-        Instant { ticks: T::max_value(), phantom: PhantomData }
+        Instant {
+            ticks: T::max_value(),
+            phantom: PhantomData,
+        }
     }
 
     pub(crate) fn new(instant_value: T) -> Self {
-        Self { ticks: instant_value, phantom: PhantomData }
+        Self {
+            ticks: instant_value,
+            phantom: PhantomData,
+        }
     }
 
     pub fn epoch() -> Self {
@@ -63,7 +74,6 @@ impl<T: Tick, S: Scale> Instant<T, S> {
     {
         let ticks = value.ticks.try_into().map_err(|_| InstantOutOfRange)?;
         Ok(Instant::new(ticks))
-
     }
 
     // TODO maybe use the error type from TryInto instead
@@ -76,14 +86,6 @@ impl<T: Tick, S: Scale> Instant<T, S> {
         Ok(Instant::new(ticks))
     }
 
-    pub(crate) fn from<T2>(value: Instant<T2, S>) -> Self
-    where
-        T2: Tick,
-        T2: Into<T>,
-    {
-        Instant::new(value.ticks.into())
-    }
-
     pub fn into<T2>(self) -> Instant<T2, S>
     where
         T2: Tick,
@@ -93,28 +95,39 @@ impl<T: Tick, S: Scale> Instant<T, S> {
     }
 
     pub fn widen<T2: Tick>(self) -> Instant<<T as Widen<T2>>::Output, S>
-    where T: Widen<T2>
+    where
+        T: Widen<T2>,
     {
         Instant::new(self.ticks.widen())
     }
 
     pub fn floor<S2: Scale>(&self) -> Instant<T, S2> {
-        assert!(S2::TICKS_PER_SECOND <= S::TICKS_PER_SECOND, "Cannot floor scale to a higher scale");
+        assert!(
+            S2::TICKS_PER_SECOND <= S::TICKS_PER_SECOND,
+            "Cannot floor scale to a higher scale"
+        );
         let factor = T::from(S::TICKS_PER_SECOND).unwrap() / T::from(S2::TICKS_PER_SECOND).unwrap();
         Instant::new(self.ticks.div_floor(&factor))
     }
 
     pub fn split<S2: Scale>(&self) -> (Instant<T, S2>, Duration<T, S>) {
-        assert!(S2::TICKS_PER_SECOND <= S::TICKS_PER_SECOND, "Cannot split scale to a higher scale");
+        assert!(
+            S2::TICKS_PER_SECOND <= S::TICKS_PER_SECOND,
+            "Cannot split scale to a higher scale"
+        );
         let factor = T::from(S::TICKS_PER_SECOND).unwrap() / T::from(S2::TICKS_PER_SECOND).unwrap();
         let (ticks, remainder) = self.ticks.div_mod_floor(&factor);
         (Instant::new(ticks), Duration::new(remainder))
     }
 
     pub fn extend<T2: Tick, S2: Scale>(&self) -> Option<Instant<T2, S2>> {
-        assert!(S2::TICKS_PER_SECOND >= S::TICKS_PER_SECOND, "Cannot extend scale to a lower scale");
+        assert!(
+            S2::TICKS_PER_SECOND >= S::TICKS_PER_SECOND,
+            "Cannot extend scale to a lower scale"
+        );
         let ticks = T2::from(self.ticks)?;
-        let factor = T2::from(S2::TICKS_PER_SECOND).unwrap() / T2::from(S::TICKS_PER_SECOND).unwrap();
+        let factor =
+            T2::from(S2::TICKS_PER_SECOND).unwrap() / T2::from(S::TICKS_PER_SECOND).unwrap();
         let ticks = ticks.checked_mul(&factor)?;
         Some(Instant::new(ticks))
     }
@@ -128,7 +141,11 @@ impl<T: Tick, S: Scale> Sub for Instant<T, S> {
     type Output = Duration<T, S>;
 
     fn sub(self, rhs: Self) -> Self::Output {
-        Duration::new(self.ticks.checked_sub(&rhs.ticks).expect("instant subtraction underflow"))
+        Duration::new(
+            self.ticks
+                .checked_sub(&rhs.ticks)
+                .expect("instant subtraction underflow"),
+        )
     }
 }
 
@@ -136,7 +153,11 @@ impl<T: Tick, S: Scale> Add<Duration<T, S>> for Instant<T, S> {
     type Output = Self;
 
     fn add(self, rhs: Duration<T, S>) -> Self::Output {
-        Self::new(self.ticks.checked_add(&rhs.ticks()).expect("instant addition overflow"))
+        Self::new(
+            self.ticks
+                .checked_add(&rhs.ticks())
+                .expect("instant addition overflow"),
+        )
     }
 }
 
@@ -179,7 +200,7 @@ impl<T: Tick, S: Scale> Add<Duration<T, S>> for Instant<T, S> {
 
 impl<T1: Tick, S1: Scale, T2: Tick, S2: Scale> PartialEq<Instant<T2, S2>> for Instant<T1, S1>
 where
-    T1: NumCmp<T2>
+    T1: NumCmp<T2>,
 {
     fn eq(&self, other: &Instant<T2, S2>) -> bool {
         // If
@@ -205,14 +226,18 @@ where
         let s1 = S1::TICKS_PER_SECOND;
         let t2 = other.ticks;
         let s2 = S2::TICKS_PER_SECOND;
-        if s1 < s2 {
-            let factor = T2::from(s2/s1).expect("scale conversion factor is too large for type T2");
-            t1.num_eq(t2*factor)
-        } else if s1 > s2 {
-            let factor = T1::from(s1/s2).expect("scale conversion factor is too large for type T1");
-            (t1*factor).num_eq(t2)
-        } else {
-            t1.num_eq(t2)
+        match s1.cmp(&s2) {
+            std::cmp::Ordering::Less => {
+                let factor =
+                    T2::from(s2 / s1).expect("scale conversion factor is too large for type T2");
+                t1.num_eq(t2 * factor)
+            }
+            std::cmp::Ordering::Greater => {
+                let factor =
+                    T1::from(s1 / s2).expect("scale conversion factor is too large for type T1");
+                (t1 * factor).num_eq(t2)
+            }
+            std::cmp::Ordering::Equal => t1.num_eq(t2),
         }
     }
 }
@@ -244,7 +269,8 @@ where
 }*/
 
 impl<T1: Tick, S1: Scale, T2: Tick, S2: Scale> PartialOrd<Instant<T2, S2>> for Instant<T1, S1>
-where T1: NumCmp<T2>
+where
+    T1: NumCmp<T2>,
 {
     fn partial_cmp(&self, other: &Instant<T2, S2>) -> Option<std::cmp::Ordering> {
         // Similar to PartialEq, if
@@ -259,14 +285,18 @@ where T1: NumCmp<T2>
         let s1 = S1::TICKS_PER_SECOND;
         let t2 = other.ticks;
         let s2 = S2::TICKS_PER_SECOND;
-        if s1 < s2 {
-            let factor = T2::from(s2/s1).expect("scale conversion factor is too large for type T2");
-            t1.num_cmp(t2*factor)
-        } else if s1 > s2 {
-            let factor = T1::from(s1/s2).expect("scale conversion factor is too large for type T1");
-            (t1*factor).num_cmp(t2)
-        } else {
-            t1.num_cmp(t2)
+        match s1.cmp(&s2) {
+            std::cmp::Ordering::Less => {
+                let factor =
+                    T2::from(s2 / s1).expect("scale conversion factor is too large for type T2");
+                t1.num_cmp(t2 * factor)
+            }
+            std::cmp::Ordering::Greater => {
+                let factor =
+                    T1::from(s1 / s2).expect("scale conversion factor is too large for type T1");
+                (t1 * factor).num_cmp(t2)
+            }
+            std::cmp::Ordering::Equal => t1.num_cmp(t2),
         }
     }
 }
@@ -287,8 +317,10 @@ impl<T: Tick, S: Scale> TryFrom<SystemTime> for Instant<T, S> {
     type Error = std::time::SystemTimeError;
 
     fn try_from(value: SystemTime) -> Result<Self, Self::Error> {
-        let ticks_per_second = T::from(S::TICKS_PER_SECOND).expect("ticks per second is too large for type T)");
-        let nanoseconds_per_second = T::from(1_000_000_000).expect("nanoseconds per second is too large for type T)");
+        let ticks_per_second =
+            T::from(S::TICKS_PER_SECOND).expect("ticks per second is too large for type T)");
+        let nanoseconds_per_second =
+            T::from(1_000_000_000).expect("nanoseconds per second is too large for type T)");
         let nanoseconds_per_tick = nanoseconds_per_second / ticks_per_second;
 
         let (mut seconds, subsecond_ns) = system_time_to_time_t(value);
@@ -319,7 +351,8 @@ fn system_time_to_time_t(value: SystemTime) -> (i128, u32) {
         SystemTime::UNIX_EPOCH.duration_since(value)
     } else {
         value.duration_since(SystemTime::UNIX_EPOCH)
-    }.unwrap();
+    }
+    .unwrap();
     let mut seconds = duration.as_secs() as i128;
     if sign {
         seconds = -seconds;
@@ -367,7 +400,13 @@ fn system_time_includes_leap_seconds() -> bool {
     // Compute what the time_t value *should* be if SystemTime returns Unix time (i.e. no leap seconds).
     // If the time_t value is different, then the system time includes leap seconds.
     let unix_time = utc_to_unix_time(
-        1900 + georgian.tm_year, 1 + georgian.tm_mon, georgian.tm_mday, georgian.tm_hour, georgian.tm_min, georgian.tm_sec);
+        1900 + georgian.tm_year,
+        1 + georgian.tm_mon,
+        georgian.tm_mday,
+        georgian.tm_hour,
+        georgian.tm_min,
+        georgian.tm_sec,
+    );
 
     unix_time != seconds
 }
@@ -380,7 +419,7 @@ fn utc_to_unix_time(year: i32, month: i32, day: i32, hour: i32, minute: i32, sec
     let minute = minute as i64;
     let second = second as i64;
     let unix_time = (julian_day - 2440588) * 86400 + hour * 3600 + minute * 60 + second;
-    unix_time as i64    // TODO increase precision of calculations above
+    unix_time as i64 // TODO increase precision of calculations above
 }
 
 fn julian_day(year: i32, month: i32, day: i32) -> i32 {
@@ -392,10 +431,10 @@ fn julian_day(year: i32, month: i32, day: i32) -> i32 {
     let y = year as i64;
     let m = month as i64;
     let d = day as i64;
-    let jdn = (1461 * (y + 4800 + (m - 14) / 12)) / 4
-        + (367 * (m - 2 - 12 * ((m - 14) / 12))) / 12
+    let jdn = (1461 * (y + 4800 + (m - 14) / 12)) / 4 + (367 * (m - 2 - 12 * ((m - 14) / 12))) / 12
         - (3 * ((y + 4900 + (m - 14) / 12) / 100)) / 4
-        + d - 32075;
+        + d
+        - 32075;
     jdn as i32
 }
 
@@ -420,7 +459,6 @@ mod tests {
 
         let t1: InstantNs128 = SystemTime::now().try_into().unwrap();
         let t2: InstantNs128 = SystemTime::now().try_into().unwrap();
-        let duration = t2 - t1;
         assert!(t1 <= t2);
     }
 }

@@ -2,8 +2,8 @@ use std::cmp::min;
 use std::marker::PhantomData;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
+
 use crate::cursor::{Cursor, CursorPosition, CursorWithPosition};
-use crate::slice_cursor::SliceCursor;
 
 pub(crate) struct SharedVecCursor<'a, T> {
     vec: Arc<Vec<T>>,
@@ -30,7 +30,7 @@ impl<'a, T> SharedVecCursor<'a, T> {
         Self::check_size(vec);
         SharedVecCursor {
             vec: vec.clone(),
-            pos: vec.len()+1,
+            pos: vec.len() + 1,
             phantom: PhantomData,
         }
     }
@@ -40,13 +40,13 @@ impl<'a, T> SharedVecCursor<'a, T> {
         assert!(pos < vec.len(), "Position out of bounds");
         SharedVecCursor {
             vec: vec.clone(),
-            pos: pos+1,
+            pos: pos + 1,
             phantom: PhantomData,
         }
     }
 
     fn check_size(vec: &Arc<Vec<T>>) {
-        assert!(vec.len() <= usize::MAX-1, "Vec too large");
+        assert!(vec.len() < usize::MAX, "Vec too large");
     }
 
     fn ref_pos(&self, index: usize) -> &'a T {
@@ -106,7 +106,7 @@ impl<'a, T> Cursor for SharedVecCursor<'a, T> {
         if self.pos > 0 {
             self.pos -= 1;
             if self.pos > 0 {
-                Some(self.ref_pos(self.pos-1))
+                Some(self.ref_pos(self.pos - 1))
             } else {
                 None
             }
@@ -117,7 +117,7 @@ impl<'a, T> Cursor for SharedVecCursor<'a, T> {
 
     fn current(&self) -> Option<Self::Item> {
         if self.pos > 0 && self.pos <= self.vec.len() {
-            Some(&self.ref_pos(self.pos - 1))
+            Some(self.ref_pos(self.pos - 1))
         } else {
             None
         }
@@ -125,7 +125,7 @@ impl<'a, T> Cursor for SharedVecCursor<'a, T> {
 
     fn peek_next(&self) -> Option<Self::Item> {
         if self.pos < self.vec.len() {
-            Some(&self.ref_pos(self.pos))
+            Some(self.ref_pos(self.pos))
         } else {
             None
         }
@@ -133,7 +133,7 @@ impl<'a, T> Cursor for SharedVecCursor<'a, T> {
 
     fn peek_prev(&self) -> Option<Self::Item> {
         if self.pos > 1 {
-            Some(&self.ref_pos(self.pos - 1 - 1))
+            Some(self.ref_pos(self.pos - 1 - 1))
         } else {
             None
         }

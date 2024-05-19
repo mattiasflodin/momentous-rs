@@ -1,13 +1,14 @@
 use std::hash::Hash;
 use std::marker::PhantomData;
 use std::ops::{Add, Mul, Sub};
+
 use num_rational::Ratio;
 use num_traits::PrimInt;
-use crate::div_rem::{DivRemFloor, MulDivRemCeil, MulDivRemFloor};
-use crate::{Instant, InstantOutOfRange, Nanoseconds};
+
 use crate::instant::Tick;
 use crate::scale::{Milliseconds, Scale, Seconds};
 use crate::widen::Widen;
+use crate::{Instant, InstantOutOfRange, Nanoseconds};
 
 #[derive(Debug, Clone, Copy, Ord, PartialOrd, Eq, PartialEq, Hash)]
 pub struct Duration<T: PrimInt, S: Scale> {
@@ -34,10 +35,13 @@ pub type DurationNs128 = Duration<i128, Nanoseconds>;
 
 impl<T: Tick, S: Scale> Duration<T, S> {
     pub(crate) fn new(t: T) -> Self {
-        Self { ticks: t, phantom: PhantomData }
+        Self {
+            ticks: t,
+            phantom: PhantomData,
+        }
     }
 
-/*    pub fn from_seconds(seconds: T) -> Self {
+    /*    pub fn from_seconds(seconds: T) -> Self {
         // TODO check for overflow and generate error
         Self::new(seconds * T::from(S::TICKS_PER_SECOND).unwrap())
     }
@@ -63,9 +67,9 @@ impl<T: Tick, S: Scale> Duration<T, S> {
     // Can't implement TryFrom trait because of the blanket specialization in core.
     // https://github.com/rust-lang/rust/issues/50133
     pub fn try_from<T2>(value: Instant<T2, S>) -> Result<Self, InstantOutOfRange>
-        where
-            T2: Tick,
-            T2: TryInto<T>,
+    where
+        T2: Tick,
+        T2: TryInto<T>,
     {
         let ticks = value.ticks.try_into().map_err(|_| InstantOutOfRange)?;
         Ok(Duration::new(ticks))
@@ -73,44 +77,51 @@ impl<T: Tick, S: Scale> Duration<T, S> {
 
     // TODO maybe use the error type from TryInto instead
     pub fn try_into<T2>(self) -> Result<Duration<T2, S>, InstantOutOfRange>
-        where
-            T2: Tick,
-            T: TryInto<T2>,
+    where
+        T2: Tick,
+        T: TryInto<T2>,
     {
         let ticks = self.ticks.try_into().map_err(|_| InstantOutOfRange)?;
         Ok(Duration::new(ticks))
     }
 
     pub(crate) fn from<T2>(value: Duration<T2, S>) -> Self
-        where
-            T2: Tick,
-            T2: Into<T>,
+    where
+        T2: Tick,
+        T2: Into<T>,
     {
         Duration::new(value.ticks.into())
     }
 
     pub fn into<T2>(self) -> Duration<T2, S>
-        where
-            T2: Tick,
-            T: Into<T2>,
+    where
+        T2: Tick,
+        T: Into<T2>,
     {
         Duration::new(self.ticks.into())
     }
 
     pub fn widen<T2: Tick>(self) -> Duration<<T as Widen<T2>>::Output, S>
-        where T: Widen<T2>
+    where
+        T: Widen<T2>,
     {
         Duration::new(self.ticks.widen())
     }
 
     pub fn floor<S2: Scale>(&self) -> Duration<T, S2> {
-        assert!(S2::TICKS_PER_SECOND <= S::TICKS_PER_SECOND, "Cannot floor to a higher scale");
+        assert!(
+            S2::TICKS_PER_SECOND <= S::TICKS_PER_SECOND,
+            "Cannot floor to a higher scale"
+        );
         let factor = T::from(S::TICKS_PER_SECOND).unwrap() / T::from(S2::TICKS_PER_SECOND).unwrap();
         Duration::new(self.ticks / factor)
     }
 
     pub fn extend<S2: Scale>(&self) -> Option<Duration<T, S2>> {
-        assert!(S2::TICKS_PER_SECOND >= S::TICKS_PER_SECOND, "Cannot extend scale to a lower scale");
+        assert!(
+            S2::TICKS_PER_SECOND >= S::TICKS_PER_SECOND,
+            "Cannot extend scale to a lower scale"
+        );
         let factor = T::from(S2::TICKS_PER_SECOND).unwrap() / T::from(S::TICKS_PER_SECOND).unwrap();
         Some(Duration::new(self.ticks.checked_mul(&factor)?))
     }
@@ -141,7 +152,7 @@ impl<T: Tick, S: Scale> Duration<T, S> {
         let t1 = Ratio::new(self.ticks, T::from(S::TICKS_PER_SECOND).unwrap());
         let t2 = Ratio::new(other.ticks, T::from(S2::TICKS_PER_SECOND).unwrap());
         let quotient = (t1 / t2).ceil();
-        let remainder = t2*quotient - t1;
+        let remainder = t2 * quotient - t1;
         let remainder = remainder * T::from(S::TICKS_PER_SECOND).unwrap();
         (quotient.to_integer(), Duration::new(remainder.to_integer()))
     }
