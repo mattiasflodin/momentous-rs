@@ -1,18 +1,17 @@
 use std::cmp::Ordering::{Equal, Greater, Less};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use crate::div_rem::DivRemFloor;
+
 use lazy_static::lazy_static;
-use num_traits::{AsPrimitive, PrimInt};
 use numcmp::NumCmp;
 use zoneinfo_compiled::{parse, TZData};
-use crate::{DurationNs128, Instant, InstantNs128, Nanoseconds, Scale};
+
 use crate::cursor::Cursor;
-use crate::SliceCursor;
-use crate::duration::{DurationS128, DurationS32, DurationS64};
-use crate::instant::{InstantS128, InstantS32, InstantS64, Tick};
+use crate::duration::DurationS32;
+use crate::instant::{InstantS32, Tick};
 use crate::scale::Seconds;
 use crate::shared_vec_cursor::SharedVecCursor;
+use crate::{Instant, Scale};
 
 #[derive(Debug, PartialEq, Copy, Clone)]
 pub(crate) struct LeapSecond {
@@ -23,7 +22,6 @@ pub(crate) struct LeapSecond {
     /// Number of leap seconds to be added.
     pub leap_second_count: i32,
 }
-
 
 // About names of zones
 // https://docs.python.org/3/library/zoneinfo.html#zoneinfo.ZoneInfo.key
@@ -46,7 +44,9 @@ fn tzdir() -> PathBuf {
     // We could try to be more clever here (look for the root directory that /etc/localtime points
     // to, check if /etc/zoneinfo has anything, etc), but the logic here appears to be what
     // the C library does so we probably shouldn't deviate too much from that behavior.
-    std::env::var("TZDIR").unwrap_or_else(|_| "/usr/share/zoneinfo".to_string()).into()
+    std::env::var("TZDIR")
+        .unwrap_or_else(|_| "/usr/share/zoneinfo".to_string())
+        .into()
 }
 
 pub(crate) fn load_zoneinfo(name: &str) -> TZData {
@@ -54,7 +54,6 @@ pub(crate) fn load_zoneinfo(name: &str) -> TZData {
     let data = std::fs::read(path).expect("failed to read zoneinfo file");
     parse(data).expect("failed to parse zoneinfo file")
 }
-
 
 lazy_static! {
     // TODO store expiration time and fire of a thread to refresh the cache
@@ -106,21 +105,25 @@ impl LeapSecondChronology {
         let path = tzdir().join("right/UTC");
         let data = std::fs::read(path).expect("failed to read zoneinfo file");
         let tz = parse(data).expect("failed to parse zoneinfo file");
-        let mut vec: Vec<LeapSecond> = tz.leap_seconds.iter().map(|ls| {
-            let ls = LeapSecond {
+        let mut vec: Vec<LeapSecond> = tz
+            .leap_seconds
+            .iter()
+            .map(|ls| LeapSecond {
                 unix_timestamp: ls.timestamp as i64,
                 leap_second_count: ls.leap_second_count,
-            };
-            ls
-        }).collect();
-        vec.sort_by(|a, b| a.unix_timestamp.cmp(&b.unix_timestamp));  // Most likely already sorted but just in case
-        // TODO what's all of the above for !?
+            })
+            .collect();
+        vec.sort_by(|a, b| a.unix_timestamp.cmp(&b.unix_timestamp)); // Most likely already sorted but just in case
+                                                                     // TODO what's all of the above for !?
         LeapSecondChronology(Arc::new(load_leap_segments()))
     }
 
-    pub(crate) fn by_instant<T: Tick, S: Scale>(&self, instant: Instant<T, S>) -> SharedVecCursor<ContinuousTimeSegment>
+    pub(crate) fn by_instant<T, S: Scale>(
+        &self,
+        instant: Instant<T, S>,
+    ) -> SharedVecCursor<ContinuousTimeSegment>
     where
-        T: NumCmp<i32>
+        T: Tick + NumCmp<i32>,
     {
         let segments = self.0.as_slice();
         let instant: Instant<T, Seconds> = instant.floor();
@@ -128,8 +131,10 @@ impl LeapSecondChronology {
         let search_result = segments.binary_search_by(|s| {
             if instant < s.start_instant {
                 Greater
-            } else if instant < s.start_instant + DurationS32::new(
-                    s.duration_days as i32 * 86_400 + s.leap_seconds as i32) {
+            } else if instant
+                < s.start_instant
+                    + DurationS32::new(s.duration_days as i32 * 86_400 + s.leap_seconds as i32)
+            {
                 Equal
             } else {
                 Less
@@ -204,7 +209,7 @@ fn load_leap_segments() -> Vec<ContinuousTimeSegment> {
             start_day,
             duration_days,
             leap_seconds,
-            accumulated_leap_seconds: previous_leap_second_total
+            accumulated_leap_seconds: previous_leap_second_total,
         });
 
         start_instant = start_instant + DurationS32::new(duration_seconds);
@@ -215,17 +220,18 @@ fn load_leap_segments() -> Vec<ContinuousTimeSegment> {
     segments
 }
 
-
 pub(crate) fn get_leap_second_adjustment(unix_timestamp: i128) -> i32 {
     // TODO can cast unix_timestamp to i32 here. If it's outside the range of the leap second array then
     // there are obviously no more leap seconds.
     let leap_seconds = get_leap_seconds();
-    let day = unix_timestamp/86400;
+    let day = unix_timestamp / 86400;
     let cursor = leap_seconds.by_day(day);
     if cursor.at_start() {
         0
     } else if cursor.at_end() {
-        let segment = cursor.peek_prev().expect("there should be at least one leap-second segment");
+        let segment = cursor
+            .peek_prev()
+            .expect("there should be at least one leap-second segment");
         segment.accumulated_leap_seconds
     } else {
         cursor.current().unwrap().accumulated_leap_seconds
@@ -261,7 +267,7 @@ pub(crate) fn get_leap_second_segments_since_day(day: u32) -> &'static [Continuo
     let segments = LEAP_SECOND_SEGMENTS.as_ref();
     let index = segments.partition_point(|s| s.start_day <= day);
     if index == 0 {
-        &segments
+        segments
     } else {
         &segments[index - 1..]
     }

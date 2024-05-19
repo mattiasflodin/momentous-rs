@@ -2,7 +2,13 @@ use crate::instant::Tick;
 
 pub(crate) trait LeastCommonWidth<T: Tick>: Tick {
     type Output: Tick;
-    fn least_common_width(self, other: T) -> (<Self as LeastCommonWidth<T>>::Output, <Self as LeastCommonWidth<T>>::Output);
+    fn least_common_width(
+        self,
+        other: T,
+    ) -> (
+        <Self as LeastCommonWidth<T>>::Output,
+        <Self as LeastCommonWidth<T>>::Output,
+    );
 }
 
 macro_rules! impl_least_common_width {

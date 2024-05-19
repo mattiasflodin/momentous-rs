@@ -1,5 +1,6 @@
-use num_traits::PrimInt;
 use std::cmp::min;
+
+use num_traits::PrimInt;
 
 /*pub(crate) trait DivFloor : Sized {
     fn div_floor(&self, other: Self) -> Self;
@@ -135,15 +136,14 @@ impl<T: PrimInt> MulDivRemFloor for T {
         let c = divisor;
         let (q_a, r_a) = a.div_rem_floor(c);
         let (q_b, r_b) = b.div_rem_floor(c);
-        let (q_c, r_c) = (r_a*r_b).div_rem_floor(c);
-        (q_a*b + r_a*q_b + q_c, r_c)
+        let (q_c, r_c) = (r_a * r_b).div_rem_floor(c);
+        (q_a * b + r_a * q_b + q_c, r_c)
     }
 }
 
 pub(crate) trait DivDivRemFloor: Sized {
     fn div_div_rem_floor(&self, divisor1: Self, divisor2: Self) -> (Self, Self);
 }
-
 
 pub(crate) trait MulDivRemCeil: Sized {
     fn mul_div_rem_ceil(&self, multiplier: Self, divisor: Self) -> (Self, Self);
@@ -158,8 +158,8 @@ impl<T: PrimInt> MulDivRemCeil for T {
         let c = divisor;
         let (q_a, r_a) = a.div_rem_ceil(c);
         let (q_b, r_b) = b.div_rem_ceil(c);
-        let (q_c, r_c) = (r_a*r_b).div_rem_ceil(c);
-        (q_a*b + r_a*q_b + q_c, r_c)
+        let (q_c, r_c) = (r_a * r_b).div_rem_ceil(c);
+        (q_a * b + r_a * q_b + q_c, r_c)
     }
 }
 
@@ -171,17 +171,16 @@ pub(crate) trait ClampedDivRem<Q: Ord>: Sized {
 impl<T, Q> ClampedDivRem<Q> for T
 where
     T: PrimInt + TryInto<Q>,
-    Q: Ord + Into<T> + Copy
+    Q: Ord + Into<T> + Copy,
 {
     type Quotient = Q;
     fn clamped_div_rem(self, divisor: T, max_quotient: Self::Quotient) -> (Self::Quotient, Self) {
         let quotient = min(self / divisor, max_quotient.into());
-        let remainder = self - quotient*divisor;
+        let remainder = self - quotient * divisor;
         let quotient: Self::Quotient = match quotient.try_into() {
             Ok(x) => x,
-            Err(_) => panic!("quotient is too large")
+            Err(_) => panic!("quotient is too large"),
         };
         (quotient, remainder)
     }
 }
-

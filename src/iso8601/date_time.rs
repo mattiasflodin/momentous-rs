@@ -1,22 +1,18 @@
-use std::cmp::{max, min};
-use num_traits::PrimInt;
-use numcmp::NumCmp;
+use std::cmp::min;
+
 use num_integer::Integer;
-use crate::{Duration, DurationNs128, Instant, Nanoseconds, Scale};
-use crate::div_rem::ClampedDivRem;
+use numcmp::NumCmp;
+
 use crate::cursor::Cursor;
 use crate::gregorian_normalized_date::GregorianNormalizedDate;
 use crate::instant::Tick;
-use crate::InstantOutOfRange;
-use crate::iso8601::{Chronology, DateTimeBuilder, Precision};
 use crate::iso8601::date_time_with_carry::DateTimeWithCarry;
-use crate::iso8601::load_chronology;
 use crate::iso8601::util::days_in_month;
-use crate::scale::Seconds;
+use crate::iso8601::{Chronology, DateTimeBuilder, Precision, SECONDS_PER_DAY};
 use crate::widen::Widen;
-use crate::zoneinfo::{get_leap_seconds};
-
-const SECONDS_PER_DAY: u32 = 86_400;
+use crate::zoneinfo::get_leap_seconds;
+use crate::InstantOutOfRange;
+use crate::{Instant, Scale};
 
 #[derive(Debug, Clone)]
 pub struct DateTime {
@@ -40,7 +36,10 @@ impl DateTime {
         DateTimeBuilder::new()
     }
 
-    fn from_instant<T, S>(instant: Instant<T, S>, chronology: &Chronology) -> Result<Self, InstantOutOfRange>
+    fn from_instant<T, S>(
+        instant: Instant<T, S>,
+        chronology: &Chronology,
+    ) -> Result<Self, InstantOutOfRange>
     where
         T: Tick + NumCmp<i32> + TryInto<i64>,
         S: Scale,
@@ -96,11 +95,11 @@ impl DateTime {
             self.month
         };
         let year = if precision == Precision::Decades {
-            self.year.div_floor(&10) * 10
+            Integer::div_floor(&self.year, &10) * 10
         } else if precision == Precision::Centuries {
-            self.year.div_floor(&100) * 100
+            Integer::div_floor(&self.year, &100) * 100
         } else if precision == Precision::Millennia {
-            self.year.div_floor(&1000) * 1000
+            Integer::div_floor(&self.year, &1000) * 1000
         } else {
             self.year
         };
@@ -123,8 +122,10 @@ impl DateTime {
     }
 
     pub fn add_years(&self, years: i128) -> DateTimeWithCarry {
-        assert!(self.precision >= Precision::Years,
-                "Cannot add years to a datetime with precision less than years");
+        assert!(
+            self.precision >= Precision::Years,
+            "Cannot add years to a datetime with precision less than years"
+        );
         let mut result = self.clone();
         result.add_years_mut(years);
 
@@ -132,8 +133,10 @@ impl DateTime {
     }
 
     pub fn add_months(&self, months: i128) -> DateTimeWithCarry {
-        assert!(self.precision >= Precision::Months,
-                "Cannot add months to a datetime with precision less than months");
+        assert!(
+            self.precision >= Precision::Months,
+            "Cannot add months to a datetime with precision less than months"
+        );
 
         let mut result = self.clone();
         result.add_months_mut(months);
@@ -155,8 +158,10 @@ impl DateTime {
     }
 
     pub fn add_days(&self, days: i128) -> DateTimeWithCarry {
-        assert!(self.precision >= Precision::Days,
-                "Cannot add days to a datetime with precision less than days");
+        assert!(
+            self.precision >= Precision::Days,
+            "Cannot add days to a datetime with precision less than days"
+        );
         let mut result = self.clone();
         result.add_days_mut(days);
 
@@ -171,8 +176,10 @@ impl DateTime {
     }
 
     pub fn add_minutes(&self, minutes: i128) -> DateTimeWithCarry {
-        assert!(self.precision >= Precision::Minutes,
-                "Cannot add minutes to a datetime with precision less than minutes");
+        assert!(
+            self.precision >= Precision::Minutes,
+            "Cannot add minutes to a datetime with precision less than minutes"
+        );
         let mut result = self.clone();
         result.add_minutes_mut(minutes);
 
@@ -207,8 +214,10 @@ impl DateTime {
     }
 
     pub fn add_seconds(&self, seconds: i128) -> DateTime {
-        assert!(self.precision >= Precision::Seconds,
-                "Cannot add seconds to a datetime with precision less than seconds");
+        assert!(
+            self.precision >= Precision::Seconds,
+            "Cannot add seconds to a datetime with precision less than seconds"
+        );
         if self.chronology.leap_second_smearing() {
             todo!("Leap-second smearing not yet implemented")
         } else {
@@ -227,7 +236,7 @@ impl DateTime {
     }
 
     fn add_months_mut(&mut self, months: i128) {
-        let (years, month) = ((self.month-1) as i128 + months).div_mod_floor(&12);
+        let (years, month) = ((self.month - 1) as i128 + months).div_mod_floor(&12);
         self.month = month as u8 + 1;
         self.add_years_mut(years);
     }
@@ -263,7 +272,7 @@ impl DateTime {
 
     fn add_seconds_mut(&mut self, seconds: u128) {
         let gnd = GregorianNormalizedDate::from_date(self.year, self.month, self.day);
-        let mut day = gnd.to_day();
+        let day = gnd.to_day();
         let leap_seconds = get_leap_seconds();
         let mut segment_cursor = leap_seconds.by_day(day);
 
@@ -276,7 +285,9 @@ impl DateTime {
             let segment = segment_cursor.peek_next().unwrap();
             let days_before_first_segment = segment.start_day as i128 - day;
             let seconds_before_first_segment = days_before_first_segment * SECONDS_PER_DAY as i128
-                - self.hour as i128*60*60 - self.minute as i128*60 - self.second as i128;
+                - self.hour as i128 * 60 * 60
+                - self.minute as i128 * 60
+                - self.second as i128;
             let add_seconds = min(seconds_remaining, seconds_before_first_segment as u128);
             self.add_seconds_within_segment(add_seconds as i128);
             seconds_remaining -= add_seconds;
@@ -295,20 +306,24 @@ impl DateTime {
             let segment = segment_cursor.current().unwrap();
             let days_into_segment = day - segment.start_day as i128;
             let seconds_into_segment = days_into_segment as u128 * SECONDS_PER_DAY as u128
-                + self.hour as u128*60*60 + self.minute as u128*60 + self.second as u128;
+                + self.hour as u128 * 60 * 60
+                + self.minute as u128 * 60
+                + self.second as u128;
             // Since the loop starts by advancing the cursor, we need to retreat it by one to get
             // the correct segment in the first iteration.
             let _ = segment_cursor.prev();
             seconds_into_segment
         };
 
-        while let Some(segment) = segment_cursor.next() {
-            let regular_seconds_in_segment = segment.duration_days as u128 * SECONDS_PER_DAY as u128;
+        for segment in segment_cursor {
+            let regular_seconds_in_segment =
+                segment.duration_days as u128 * SECONDS_PER_DAY as u128;
             if segment_offset_seconds < regular_seconds_in_segment - 1 {
                 // We're in the regular part of the segment. Add seconds using modular arithmetic.
                 // We need -1 above because the last second would wrap around to 00:00:00 and we
                 // don't want that to happen.
-                let ordinary_seconds_remaining = regular_seconds_in_segment - segment_offset_seconds - 1;
+                let ordinary_seconds_remaining =
+                    regular_seconds_in_segment - segment_offset_seconds - 1;
                 let add_seconds = min(seconds_remaining, ordinary_seconds_remaining);
                 self.add_seconds_within_segment(add_seconds as i128);
                 seconds_remaining -= add_seconds;
@@ -322,8 +337,9 @@ impl DateTime {
             }
 
             // Add the remaining (leap) seconds in the segment using normal arithmetic.
-            let total_seconds_in_segment = regular_seconds_in_segment + segment.leap_seconds as u128;
-            let leap_seconds_remaining = total_seconds_in_segment - segment_offset_seconds ;
+            let total_seconds_in_segment =
+                regular_seconds_in_segment + segment.leap_seconds as u128;
+            let leap_seconds_remaining = total_seconds_in_segment - segment_offset_seconds;
             if seconds_remaining >= leap_seconds_remaining {
                 // More seconds to add than there are leap seconds in the segment, i.e. we will
                 // reach the next segment. Simply move to the next day and set the time to the
@@ -337,7 +353,6 @@ impl DateTime {
                 // Not enough seconds remaining to leave the segment. Add the remaining seconds
                 // using regular arithmetic.
                 self.second += seconds_remaining as u8;
-                seconds_remaining = 0;
                 return;
             }
         }
@@ -373,16 +388,21 @@ impl DateTime {
             };
             // Note that we don't care if sub-second parts are non-zero, since this entire operation
             // will leave those parts unaffected.
-            if segment_start_day as i128 == day && self.hour == 0 && self.minute == 0 && self.second == 0 {
+            if segment_start_day as i128 == day
+                && self.hour == 0
+                && self.minute == 0
+                && self.second == 0
+            {
                 day -= 1;
                 self.add_days_mut(-1);
                 self.hour = 23;
                 self.minute = 59;
-                self.second = (60 + if let Some(prev_segment) = segment_cursor.prev() {
-                    prev_segment.leap_seconds
-                } else {
-                    0
-                }) as u8;
+                self.second = (60
+                    + if let Some(prev_segment) = segment_cursor.prev() {
+                        prev_segment.leap_seconds
+                    } else {
+                        0
+                    }) as u8;
             }
         }
 
@@ -397,8 +417,11 @@ impl DateTime {
             // so the "virtual segment" that is after the last segment starts at 00:00:01.
             // Subtracting the number of seconds calculated here will leave us at 00:00:00 which
             // is where we want to be.
-            let seconds_past_last_segment = days_past_last_segment as u128 * SECONDS_PER_DAY as u128
-                + self.hour as u128 * 60 * 60 + self.minute as u128 * 60 + self.second as u128
+            let seconds_past_last_segment = days_past_last_segment as u128
+                * SECONDS_PER_DAY as u128
+                + self.hour as u128 * 60 * 60
+                + self.minute as u128 * 60
+                + self.second as u128
                 - 1;
             let subtract_seconds = min(seconds_remaining, seconds_past_last_segment);
             self.add_seconds_within_segment(-(subtract_seconds as i128));
@@ -413,7 +436,9 @@ impl DateTime {
             let segment = segment_cursor.current().unwrap();
             let days_into_segment = day - segment.start_day as i128;
             let seconds_into_segment = days_into_segment as u128 * SECONDS_PER_DAY as u128
-                + self.hour as u128*60*60 + self.minute as u128*60 + self.second as u128;
+                + self.hour as u128 * 60 * 60
+                + self.minute as u128 * 60
+                + self.second as u128;
             let segment_duration_seconds = segment.duration_days as u128 * SECONDS_PER_DAY as u128
                 + segment.leap_seconds as u128;
             // Since the loop starts by retreating the cursor, we need to advance it to get
@@ -447,7 +472,8 @@ impl DateTime {
             }
 
             // Subtract the remaining seconds in the segment using modular arithmetic.
-            let non_leap_seconds_in_segment = segment.duration_days as u128 * SECONDS_PER_DAY as u128;
+            let non_leap_seconds_in_segment =
+                segment.duration_days as u128 * SECONDS_PER_DAY as u128;
             let total_seconds_in_segment = non_leap_seconds_in_segment + leap_seconds_in_segment;
             let seconds_remaining_in_segment = total_seconds_in_segment - segment_offset_seconds;
             let subtract_seconds = min(seconds_remaining, seconds_remaining_in_segment);
@@ -466,11 +492,12 @@ impl DateTime {
             self.add_days_mut(-1);
             self.hour = 23;
             self.minute = 59;
-            self.second = (60 + if let Some(prev_segment) = segment_cursor.peek_prev() {
-                prev_segment.leap_seconds
-            } else {
-                0
-            }) as u8;
+            self.second = (60
+                + if let Some(prev_segment) = segment_cursor.peek_prev() {
+                    prev_segment.leap_seconds
+                } else {
+                    0
+                }) as u8;
         }
 
         if seconds_remaining != 0 {
@@ -499,10 +526,10 @@ impl DateTime {
 
 #[cfg(test)]
 mod tests {
-    use crate::InstantNs128;
     use crate::iso8601::chronology::load_chronology;
-    use crate::iso8601::DateTime;
     use crate::iso8601::precision::Precision;
+    use crate::iso8601::DateTime;
+    use crate::InstantNs128;
 
     #[test]
     fn from_instant() {
@@ -513,7 +540,9 @@ mod tests {
         // the implementation of from_instant.
         let date_time = DateTime::from_instant(
             InstantNs128::new((11017 * 24 * 60 * 60 + 22) * 1_000_000_000),
-            &chronology).unwrap();
+            &chronology,
+        )
+        .unwrap();
         assert_eq!(date_time.year, 2000);
         assert_eq!(date_time.month, 3);
         assert_eq!(date_time.day, 1);
@@ -527,7 +556,9 @@ mod tests {
         // One nanosecond earlier than above.
         let date_time = DateTime::from_instant(
             InstantNs128::new((11017 * 24 * 60 * 60 + 22) * 1_000_000_000 - 1),
-            &chronology).unwrap();
+            &chronology,
+        )
+        .unwrap();
         assert_eq!(date_time.year, 2000);
         assert_eq!(date_time.month, 2);
         assert_eq!(date_time.day, 29);
@@ -565,7 +596,9 @@ mod tests {
         // Introduction of the Gregorian calendar. 141427 days before unix epoch.
         let date_time = DateTime::from_instant(
             InstantNs128::new(-141427 * 24 * 60 * 60 * 1_000_000_000),
-            &chronology).unwrap();
+            &chronology,
+        )
+        .unwrap();
         assert_eq!(date_time.year, 1582);
         assert_eq!(date_time.month, 10);
         assert_eq!(date_time.day, 15);
@@ -579,7 +612,9 @@ mod tests {
         // Second before 1990 leap second
         let date_time = DateTime::from_instant(
             InstantNs128::new((7670 * 24 * 60 * 60 + 14) * 1_000_000_000),
-            &chronology).unwrap();
+            &chronology,
+        )
+        .unwrap();
         assert_eq!(date_time.year, 1990);
         assert_eq!(date_time.month, 12);
         assert_eq!(date_time.day, 31);
@@ -593,7 +628,9 @@ mod tests {
         // 1990 leap second.
         let date_time = DateTime::from_instant(
             InstantNs128::new((7670 * 24 * 60 * 60 + 15) * 1_000_000_000),
-            &chronology).unwrap();
+            &chronology,
+        )
+        .unwrap();
         assert_eq!(date_time.year, 1990);
         assert_eq!(date_time.month, 12);
         assert_eq!(date_time.day, 31);
@@ -607,7 +644,9 @@ mod tests {
         // Second after 1990 leap second.
         let date_time = DateTime::from_instant(
             InstantNs128::new((7670 * 24 * 60 * 60 + 16) * 1_000_000_000),
-            &chronology).unwrap();
+            &chronology,
+        )
+        .unwrap();
         assert_eq!(date_time.year, 1991);
         assert_eq!(date_time.month, 1);
         assert_eq!(date_time.day, 1);
@@ -686,7 +725,6 @@ mod tests {
 
     #[test]
     fn add_subtract_seconds() {
-        let chronology = load_chronology("UTC");
         // Two seconds before 1990 leap second
         let datetime = DateTime::builder()
             .year(1990)
@@ -769,7 +807,6 @@ mod tests {
         // for testing. This would also allow us to test negative leap seconds and multiple
         // leap seconds in a single segment.
 
-        let chronology = load_chronology("UTC");
         // The first leap second was added on 1972-06-30, but our first leap-second segment starts
         // at Unix epoch and ends with that date.
         let datetime = DateTime::builder()
@@ -827,7 +864,7 @@ mod tests {
         // while also placing us near the first leap second. It's 912 days between
         // 1969-12-31 and 1972-06-30, but we want to end up one second earlier (:58)
         // so we add 912*24*60*60 - 1 seconds.
-        let datetime = datetime.add_seconds(912*24*60*60 - 1);
+        let datetime = datetime.add_seconds(912 * 24 * 60 * 60 - 1);
         assert_eq!(datetime.year, 1972);
         assert_eq!(datetime.month, 6);
         assert_eq!(datetime.day, 30);
@@ -880,7 +917,6 @@ mod tests {
 
     #[test]
     fn add_minutes() {
-        let chronology = load_chronology("UTC");
         // Two minutes before 1990 leap second
         let datetime = DateTime::builder()
             .year(1990)
@@ -981,12 +1017,7 @@ mod tests {
 
     #[test]
     fn add_months() {
-        let chronology = load_chronology("UTC");
-        let datetime = DateTime::builder()
-            .year(2000)
-            .month(3)
-            .day(1)
-            .build();
+        let datetime = DateTime::builder().year(2000).month(3).day(1).build();
 
         let datetime = datetime.add_months(1).unwrap();
         assert_eq!(datetime.year, 2000);

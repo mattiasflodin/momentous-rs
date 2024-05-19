@@ -1,7 +1,6 @@
-use std::cmp::{max, min};
 use std::num::NonZeroUsize;
 
-pub trait Cursor : Iterator {
+pub trait Cursor: Iterator {
     fn advance_by(&mut self, n: usize) -> Result<(), NonZeroUsize>;
     fn prev(&mut self) -> Option<Self::Item>;
     fn current(&self) -> Option<Self::Item>;
@@ -18,8 +17,7 @@ pub enum CursorPosition {
     End,
 }
 
-
-pub trait CursorWithPosition : Cursor {
+pub trait CursorWithPosition: Cursor {
     fn pos(&self) -> CursorPosition;
     fn set_pos(&mut self, pos: CursorPosition);
 }

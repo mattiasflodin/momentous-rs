@@ -1,12 +1,9 @@
-use crate::gregorian_normalized_date::GregorianNormalizedDate;
 use crate::iso8601::DateTime;
-use crate::zoneinfo::{ContinuousTimeSegment, get_leap_seconds};
 
 pub struct DateTimeWithCarry {
     date_time: DateTime,
     days_carry: u128,
     seconds_carry: u128,
-
     //day: i128,
     //segment_cursor: SliceCursor<ContinuousTimeSegment>,
 }
@@ -42,7 +39,7 @@ impl DateTimeWithCarry {
 
     pub fn unwrap(self) -> DateTime {
         if !self.has_carry() {
-            return self.date_time;
+            self.date_time
         } else {
             panic!("Trying to unwrap DateTimeWithCarry that has a carry")
         }

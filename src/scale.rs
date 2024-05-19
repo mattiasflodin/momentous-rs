@@ -1,4 +1,3 @@
-use std::cmp::Ordering;
 use std::hash::Hash;
 
 pub trait Scale: Clone + Copy + Ord + PartialOrd + Eq + PartialEq + Hash + Sized {

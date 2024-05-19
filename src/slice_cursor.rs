@@ -1,5 +1,6 @@
 use std::cmp::min;
 use std::num::NonZeroUsize;
+
 use crate::cursor::{Cursor, CursorPosition, CursorWithPosition};
 
 pub(crate) struct SliceCursor<'a, T> {
@@ -9,23 +10,20 @@ pub(crate) struct SliceCursor<'a, T> {
     // represent the "end" state. Values in between represent 1-based indices
     // into the slice. This means that slices cannot be larger than
     // usize::MAX-2.
-    pos: usize
+    pos: usize,
 }
 
 impl<'a, T> SliceCursor<'a, T> {
     pub fn at_start(slice: &'a [T]) -> Self {
         Self::check_size(slice);
-        SliceCursor {
-            slice,
-            pos: 0,
-        }
+        SliceCursor { slice, pos: 0 }
     }
 
     pub fn at_end(slice: &'a [T]) -> Self {
         Self::check_size(slice);
         SliceCursor {
             slice,
-            pos: slice.len()+1,
+            pos: slice.len() + 1,
         }
     }
 
@@ -34,12 +32,12 @@ impl<'a, T> SliceCursor<'a, T> {
         assert!(pos < slice.len(), "Position out of bounds");
         SliceCursor {
             slice,
-            pos: pos+1
+            pos: pos + 1,
         }
     }
 
     fn check_size(slice: &[T]) {
-        assert!(slice.len() <= usize::MAX-1, "Slice too large");
+        assert!(slice.len() < usize::MAX, "Slice too large");
     }
 }
 
@@ -88,7 +86,7 @@ impl<'a, T> Cursor for SliceCursor<'a, T> {
         if self.pos > 0 {
             self.pos -= 1;
             if self.pos > 0 {
-                Some(&self.slice[self.pos-1])
+                Some(&self.slice[self.pos - 1])
             } else {
                 None
             }
@@ -223,11 +221,11 @@ mod tests {
         assert_eq!(cursor.next(), Some(&3));
 
         // At specific positions.
-        let mut cursor = SliceCursor::with_pos(slice, 0);
+        let cursor = SliceCursor::with_pos(slice, 0);
         assert_eq!(cursor.current(), Some(&1));
-        let mut cursor = SliceCursor::with_pos(slice, 1);
+        let cursor = SliceCursor::with_pos(slice, 1);
         assert_eq!(cursor.current(), Some(&2));
-        let mut cursor = SliceCursor::with_pos(slice, 2);
+        let cursor = SliceCursor::with_pos(slice, 2);
         assert_eq!(cursor.current(), Some(&3));
     }
 
@@ -263,10 +261,16 @@ mod tests {
             }
         }
         let mut cursor = SliceCursor::at_start(slice);
-        assert_eq!(cursor.advance_by(7), Err(NonZeroUsize::new(expected).unwrap()));
+        assert_eq!(
+            Cursor::advance_by(&mut cursor, 7),
+            Err(NonZeroUsize::new(expected).unwrap())
+        );
 
         let mut cursor = SliceCursor::at_start(&[] as &[i32; 0]);
-        assert_eq!(cursor.advance_by(7), Err(NonZeroUsize::new(7).unwrap()));
+        assert_eq!(
+            Cursor::advance_by(&mut cursor, 7),
+            Err(NonZeroUsize::new(7).unwrap())
+        );
     }
 
     #[test]
@@ -283,7 +287,10 @@ mod tests {
             }
         }
         let mut cursor = SliceCursor::at_end(slice);
-        assert_eq!(cursor.revert_by(7), Err(NonZeroUsize::new(expected).unwrap()));
+        assert_eq!(
+            cursor.revert_by(7),
+            Err(NonZeroUsize::new(expected).unwrap())
+        );
 
         let mut cursor = SliceCursor::at_end(&[] as &[i32; 0]);
         assert_eq!(cursor.revert_by(7), Err(NonZeroUsize::new(7).unwrap()));

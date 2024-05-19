@@ -23,7 +23,7 @@
 // - 2398-03-01 to 2399-02-28
 // - 2399-03-01 to 2400-02-29
 
-use crate::div_rem::{DivRem, DivRemFloor, ClampedDivRem};
+use crate::div_rem::{ClampedDivRem, DivRem, DivRemFloor};
 
 pub(crate) struct GregorianNormalizedDate {
     // Number of 400-year cycles since 2000-03-01.
@@ -35,19 +35,21 @@ pub(crate) struct GregorianNormalizedDate {
     // Number of years since the start of the quadrennium (0-3).
     year: u8,
     // Number of days since the start of the year (0-366, where the year starts March 1).
-    day: u16
+    day: u16,
 }
 
-const GREGORIAN_CYCLE_DAYS: u32 = 97*366 + 303*365;
-const GREGORIAN_CENTURY_DAYS: u16 = 24*366 + 76*365;
-const GREGORIAN_QUADRENNIUM_DAYS: u16 = 3*365 + 1*366;
+const GREGORIAN_CYCLE_DAYS: u32 = 97 * 366 + 303 * 365;
+const GREGORIAN_CENTURY_DAYS: u16 = 24 * 366 + 76 * 365;
+#[allow(clippy::identity_op)]
+const GREGORIAN_QUADRENNIUM_DAYS: u16 = 3 * 365 + 1 * 366;
 const GREGORIAN_YEAR_DAYS: u16 = 365;
 const GREGORIAN_CYCLE_YEARS: u16 = 400;
 const GREGORIAN_CENTURY_YEARS: u8 = 100;
 const GREGORIAN_QUADRENNIUM_YEARS: u8 = 4;
 
-const GREGORIAN_NORMALIZED_DATE_OFFSET_DAYS: u16 = 11017;   // 11017 days from 1970-01-01 to 2000-03-01
-const GREGORIAN_MONTH_STARTS: [u16; 13] = [0, 31, 61, 92, 122, 153, 184, 214, 245, 275, 306, 337, 65535];  // Index 0 = March
+const GREGORIAN_NORMALIZED_DATE_OFFSET_DAYS: u16 = 11017; // 11017 days from 1970-01-01 to 2000-03-01
+const GREGORIAN_MONTH_STARTS: [u16; 13] =
+    [0, 31, 61, 92, 122, 153, 184, 214, 245, 275, 306, 337, 65535]; // Index 0 = March
 
 fn month_from_day_offset(day: u16) -> u8 {
     let mut month = (day / 30) as u8;
@@ -67,16 +69,19 @@ impl GregorianNormalizedDate {
         // The first three centuries of each cycle are normal centuries with 24 leap years and 76 normal years.
         // The fourth century is a leap century with 25 leap years and 75 normal years, so it has one extra leap day
         // at the end.
-        let (century, days_into_century) = days_into_cycle.clamped_div_rem(GREGORIAN_CENTURY_DAYS as u32, 3_u8);
+        let (century, days_into_century) =
+            days_into_cycle.clamped_div_rem(GREGORIAN_CENTURY_DAYS as u32, 3_u8);
         let days_into_century = days_into_century as u16; // 2^16 days per century
 
         // Each quadrennium has 3 normal years and 1 leap year, so it has one extra leap day at the end. The last
         // quadrennium of the first three centuries are exceptional since they lack the leap day, so they have one
         // day less. This means we can do a normal division (without clamped quotient).
-        let (quadrennium, days_into_quadrennium) = days_into_century.div_rem(GREGORIAN_QUADRENNIUM_DAYS);
+        let (quadrennium, days_into_quadrennium) =
+            days_into_century.div_rem(GREGORIAN_QUADRENNIUM_DAYS);
         let quadrennium = quadrennium as u8;
 
-        let (years_into_quadrennium, days_into_year) = days_into_quadrennium.clamped_div_rem(GREGORIAN_YEAR_DAYS, 3_u8);
+        let (years_into_quadrennium, days_into_year) =
+            days_into_quadrennium.clamped_div_rem(GREGORIAN_YEAR_DAYS, 3_u8);
 
         GregorianNormalizedDate {
             cycle,
@@ -93,16 +98,17 @@ impl GregorianNormalizedDate {
         let quadrennium = self.quadrennium as i128;
         let year = self.year as i128;
         let day = self.day as i128;
-        cycle*GREGORIAN_CYCLE_DAYS as i128 +
-            century*GREGORIAN_CENTURY_DAYS as i128 +
-            quadrennium*GREGORIAN_QUADRENNIUM_DAYS as i128 +
-            year*GREGORIAN_YEAR_DAYS as i128 +
-            day + GREGORIAN_NORMALIZED_DATE_OFFSET_DAYS as i128
+        cycle * GREGORIAN_CYCLE_DAYS as i128
+            + century * GREGORIAN_CENTURY_DAYS as i128
+            + quadrennium * GREGORIAN_QUADRENNIUM_DAYS as i128
+            + year * GREGORIAN_YEAR_DAYS as i128
+            + day
+            + GREGORIAN_NORMALIZED_DATE_OFFSET_DAYS as i128
     }
 
     pub(crate) fn from_date(year: i128, month: u8, day: u8) -> Self {
-        assert!(month >= 1 && month <= 12);
-        assert!(day >= 1 && day <= 31);
+        assert!((1..=12).contains(&month));
+        assert!((1..=31).contains(&day));
 
         let mut year = year;
         let mut month = month - 1;
@@ -115,8 +121,10 @@ impl GregorianNormalizedDate {
         year -= 2000;
         let (cycle, years_into_cycle) = year.div_rem_floor(GREGORIAN_CYCLE_YEARS as i128);
         let years_into_cycle = years_into_cycle as u16; // 2^9 years per cycle
-        let (century, years_into_century) = years_into_cycle.clamped_div_rem(GREGORIAN_CENTURY_YEARS as u16, 3_u8);
-        let (quadrennium, years_into_quadrennium) = years_into_century.clamped_div_rem(GREGORIAN_QUADRENNIUM_YEARS as u16, 24_u8);
+        let (century, years_into_century) =
+            years_into_cycle.clamped_div_rem(GREGORIAN_CENTURY_YEARS as u16, 3_u8);
+        let (quadrennium, years_into_quadrennium) =
+            years_into_century.clamped_div_rem(GREGORIAN_QUADRENNIUM_YEARS as u16, 24_u8);
         let years_into_quadrennium = years_into_quadrennium as u8; // 2^2 years per quadrennium
 
         let month_day_offset = GREGORIAN_MONTH_STARTS[month as usize];
@@ -131,7 +139,11 @@ impl GregorianNormalizedDate {
     }
 
     pub(crate) fn to_date(&self) -> (i128, u8, u8) {
-        let mut year = 2000 + 400*self.cycle + 100*self.century as i128 + 4*self.quadrennium as i128 + self.year as i128;
+        let mut year = 2000
+            + 400 * self.cycle
+            + 100 * self.century as i128
+            + 4 * self.quadrennium as i128
+            + self.year as i128;
 
         // NB: shifted so march is first. This way we don't need to care about how leap days
         // affect the month start since the leap day comes at the end of the year.
@@ -150,7 +162,8 @@ impl GregorianNormalizedDate {
     pub(crate) fn days_in_month(&self) -> u8 {
         let month = month_from_day_offset(self.day);
         if month < 11 {
-            (GREGORIAN_MONTH_STARTS[(month+1) as usize] - GREGORIAN_MONTH_STARTS[month as usize]) as u8
+            (GREGORIAN_MONTH_STARTS[(month + 1) as usize] - GREGORIAN_MONTH_STARTS[month as usize])
+                as u8
         } else if self.is_leap_year() {
             29
         } else {
@@ -167,7 +180,7 @@ impl GregorianNormalizedDate {
         // faster and simpler to just compute the gregorian year and check that per the usual
         // definition of a leap year. We use the same method as in to_date but ignore the
         // cycle since it doesn't matter.
-        let mut year = 100*self.century as u16 + 4*self.quadrennium as u16 + self.year as u16;
+        let mut year = 100 * self.century as u16 + 4 * self.quadrennium as u16 + self.year as u16;
         // We could use a binary search on GREGORIAN_MONTH_STARTS to find out the month (as we do
         // in to_date), but we really only need to know if month+2 is >= 12. Or in other words,
         // whether the day is on January 1 (day 306) or later.
@@ -193,7 +206,7 @@ mod tests {
         assert_eq!(date.century, 3);
         assert_eq!(date.quadrennium, 17);
         assert_eq!(date.year, 1);
-        assert_eq!(date.day, 306);  // 306 days from 1969-03-01 to 1970-01-01.
+        assert_eq!(date.day, 306); // 306 days from 1969-03-01 to 1970-01-01.
 
         let day = date.to_day();
         assert_eq!(day, 0);
