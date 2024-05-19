@@ -141,13 +141,13 @@ impl LeapSecondChronology {
             }
         });
         match search_result {
-            Ok(index) => SharedVecCursor::with_pos(&self.0, index),
+            Ok(index) => SharedVecCursor::with_pos(self.0.clone(), index),
             Err(index) => {
                 if index == 0 {
-                    SharedVecCursor::at_start(&self.0)
+                    SharedVecCursor::at_start(self.0.clone())
                 } else {
                     assert_eq!(index, segments.len());
-                    SharedVecCursor::at_end(&self.0)
+                    SharedVecCursor::at_end(self.0.clone())
                 }
             }
         }
@@ -165,13 +165,13 @@ impl LeapSecondChronology {
             }
         });
         match search_result {
-            Ok(index) => SharedVecCursor::with_pos(&self.0, index),
+            Ok(index) => SharedVecCursor::with_pos(self.0.clone(), index),
             Err(index) => {
                 if index == 0 {
-                    SharedVecCursor::at_start(&self.0)
+                    SharedVecCursor::at_start(self.0.clone())
                 } else {
                     assert_eq!(index, segments.len());
-                    SharedVecCursor::at_end(&self.0)
+                    SharedVecCursor::at_end(self.0.clone())
                 }
             }
         }

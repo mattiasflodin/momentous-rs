@@ -315,7 +315,7 @@ impl DateTime {
             seconds_into_segment
         };
 
-        for segment in segment_cursor {
+        while let Some(segment) = segment_cursor.next() {
             let regular_seconds_in_segment =
                 segment.duration_days as u128 * SECONDS_PER_DAY as u128;
             if segment_offset_seconds < regular_seconds_in_segment - 1 {
