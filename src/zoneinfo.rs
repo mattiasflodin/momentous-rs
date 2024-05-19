@@ -56,6 +56,8 @@ pub(crate) fn load_zoneinfo(name: &str) -> TZData {
 #[derive(Debug)]
 pub(crate) struct ContinuousTimeSegment {
     /// Instant at which this segment starts.
+    // TODO not sure it's accurate to call this an instant since the start time depends
+    // on the time zone, so it's not a single universal point in time.
     pub(crate) start_instant: Instant<i32, Seconds>,
     /// Number of days since Unix epoch that this segment starts on.
     pub(crate) start_day: u32,
