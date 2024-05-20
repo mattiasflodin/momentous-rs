@@ -175,6 +175,20 @@ impl GregorianNormalizedDate {
         }
     }
 
+    pub(crate) fn unnormalized_year(&self) -> i128 {
+        let year = 2000
+            + 400 * self.cycle
+            + 100 * self.century as i128
+            + 4 * self.quadrennium as i128
+            + self.year as i128;
+
+        if self.day >= JANUARY_1_DAY_OFFSET {
+            year + 1
+        } else {
+            year
+        }
+    }
+
     pub(crate) fn is_leap_year(&self) -> bool {
         // Leap years are at the end of each period: quadrennium, century and cycle.
         // However, because of the way we've shifted the year so that it begins in march,
@@ -188,7 +202,7 @@ impl GregorianNormalizedDate {
         // We could use a binary search on GREGORIAN_MONTH_STARTS to find out the month (as we do
         // in to_date), but we really only need to know if month+2 is >= 12. Or in other words,
         // whether the day is on January 1 (day 306) or later.
-        if self.day >= 306 {
+        if self.day >= JANUARY_1_DAY_OFFSET {
             year = (year + 1) % 400
         }
 
