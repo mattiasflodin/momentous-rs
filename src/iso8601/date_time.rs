@@ -2,9 +2,10 @@ use crate::cursor::Cursor;
 use crate::gregorian_normalized_date::GregorianNormalizedDate;
 use crate::iso8601::chronology::Chronology;
 use crate::iso8601::precision::Precision;
-use crate::iso8601::DateTimeBuilder;
+use crate::iso8601::{DateTimeBuilder, HOURS_PER_DAY, SECONDS_PER_HOUR};
 use crate::shared_vec_cursor::SharedVecCursor;
 use crate::zoneinfo::{get_leap_seconds, ContinuousTimeSegment};
+use std::cmp::min;
 
 #[derive(Debug, Clone)]
 pub struct Carry {
@@ -98,6 +99,11 @@ impl DateTime {
 
     pub fn day(&self) -> u8 {
         self.gnd.unnormalized_day()
+    }
+
+    pub fn hour(&self) -> u8 {
+        let hour = (self.second / SECONDS_PER_HOUR as u32) as u8;
+        min(hour, HOURS_PER_DAY - 1)
     }
 
     // TODO function to transfer as much carry as possible to datetime without
