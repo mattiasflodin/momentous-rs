@@ -88,6 +88,10 @@ impl DateTime {
         }
     }
 
+    pub fn year(&self) -> i128 {
+        self.gnd.unnormalized_year()
+    }
+
     // TODO function to transfer as much carry as possible to datetime without
     // overflowing to the next component. E.g. with a second of 58 and a carry of
     // 2, the carry should be reduced to 1 and the second increased to 59.
