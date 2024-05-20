@@ -199,6 +199,11 @@ impl GregorianNormalizedDate {
         }
     }
 
+    pub(crate) fn unnormalized_day(&self) -> u8 {
+        let (_, day) = month_day_from_year_day(self.day);
+        day + 1
+    }
+
     pub(crate) fn is_leap_year(&self) -> bool {
         // Leap years are at the end of each period: quadrennium, century and cycle.
         // However, because of the way we've shifted the year so that it begins in march,
