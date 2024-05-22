@@ -52,14 +52,17 @@ const GREGORIAN_QUADRENNIUM_YEARS: u8 = 4;
 const GREGORIAN_NORMALIZED_DATE_OFFSET_DAYS: u16 = 11017; // 11017 days from 1970-01-01 to 2000-03-01
 const GREGORIAN_MONTH_STARTS: [u16; 13] =
     [0, 31, 61, 92, 122, 153, 184, 214, 245, 275, 306, 337, 65535]; // Index 0 = March
+const JANUARY_1_DAY_OFFSET: u16 = 306;
 
-fn month_from_day_offset(day: u16) -> u8 {
+fn month_day_from_year_day(day: u16) -> (u8, u8) {
     let mut month = (day / 30) as u8;
-    if day < GREGORIAN_MONTH_STARTS[month as usize] {
+    let mut month_start_day = GREGORIAN_MONTH_STARTS[month as usize];
+    if day < month_start_day {
         // We have overshot the month. Move back.
         month -= 1;
+        month_start_day = GREGORIAN_MONTH_STARTS[month as usize];
     }
-    month
+    (month, (day - month_start_day) as u8)
 }
 
 impl GregorianNormalizedDate {
@@ -149,8 +152,7 @@ impl GregorianNormalizedDate {
 
         // NB: shifted so march is first. This way we don't need to care about how leap days
         // affect the month start since the leap day comes at the end of the year.
-        let mut month = month_from_day_offset(self.day);
-        let days_into_month = (self.day - GREGORIAN_MONTH_STARTS[month as usize]) as u8;
+        let (mut month, days_into_month) = month_day_from_year_day(self.day);
 
         // Now adjust so march is represented as month 3 instead of month 1, since we want to be based off of the Gregorian new year.
         month += 2;
@@ -162,7 +164,7 @@ impl GregorianNormalizedDate {
     }
 
     pub(crate) fn days_in_month(&self) -> u8 {
-        let month = month_from_day_offset(self.day);
+        let (month, _) = month_day_from_year_day(self.day);
         if month < 11 {
             (GREGORIAN_MONTH_STARTS[(month + 1) as usize] - GREGORIAN_MONTH_STARTS[month as usize])
                 as u8
@@ -298,30 +300,29 @@ mod tests {
 
     #[test]
     fn test_month_from_day_offset() {
-        // const GREGORIAN_MONTH_STARTS: [u16; 13] = [0, 31, 61, 92, 122, 153, 184, 214, 245, 275, 306, 337, 65535];
-        assert_eq!(month_from_day_offset(0), 0);
-        assert_eq!(month_from_day_offset(30), 0);
-        assert_eq!(month_from_day_offset(31), 1);
-        assert_eq!(month_from_day_offset(60), 1);
-        assert_eq!(month_from_day_offset(61), 2);
-        assert_eq!(month_from_day_offset(91), 2);
-        assert_eq!(month_from_day_offset(92), 3);
-        assert_eq!(month_from_day_offset(121), 3);
-        assert_eq!(month_from_day_offset(122), 4);
-        assert_eq!(month_from_day_offset(152), 4);
-        assert_eq!(month_from_day_offset(153), 5);
-        assert_eq!(month_from_day_offset(183), 5);
-        assert_eq!(month_from_day_offset(184), 6);
-        assert_eq!(month_from_day_offset(213), 6);
-        assert_eq!(month_from_day_offset(214), 7);
-        assert_eq!(month_from_day_offset(244), 7);
-        assert_eq!(month_from_day_offset(245), 8);
-        assert_eq!(month_from_day_offset(274), 8);
-        assert_eq!(month_from_day_offset(275), 9);
-        assert_eq!(month_from_day_offset(305), 9);
-        assert_eq!(month_from_day_offset(306), 10);
-        assert_eq!(month_from_day_offset(336), 10);
-        assert_eq!(month_from_day_offset(337), 11);
-        assert_eq!(month_from_day_offset(365), 11);
+        assert_eq!(month_day_from_year_day(0), (0, 0));
+        assert_eq!(month_day_from_year_day(30), (0, 30));
+        assert_eq!(month_day_from_year_day(31), (1, 0));
+        assert_eq!(month_day_from_year_day(60), (1, 29));
+        assert_eq!(month_day_from_year_day(61), (2, 0));
+        assert_eq!(month_day_from_year_day(91), (2, 30));
+        assert_eq!(month_day_from_year_day(92), (3, 0));
+        assert_eq!(month_day_from_year_day(121), (3, 29));
+        assert_eq!(month_day_from_year_day(122), (4, 0));
+        assert_eq!(month_day_from_year_day(152), (4, 30));
+        assert_eq!(month_day_from_year_day(153), (5, 0));
+        assert_eq!(month_day_from_year_day(183), (5, 30));
+        assert_eq!(month_day_from_year_day(184), (6, 0));
+        assert_eq!(month_day_from_year_day(213), (6, 29));
+        assert_eq!(month_day_from_year_day(214), (7, 0));
+        assert_eq!(month_day_from_year_day(244), (7, 30));
+        assert_eq!(month_day_from_year_day(245), (8, 0));
+        assert_eq!(month_day_from_year_day(274), (8, 29));
+        assert_eq!(month_day_from_year_day(275), (9, 0));
+        assert_eq!(month_day_from_year_day(305), (9, 30));
+        assert_eq!(month_day_from_year_day(306), (10, 0));
+        assert_eq!(month_day_from_year_day(336), (10, 30));
+        assert_eq!(month_day_from_year_day(337), (11, 0));
+        assert_eq!(month_day_from_year_day(365), (11, 28));
     }
 }
