@@ -189,6 +189,16 @@ impl GregorianNormalizedDate {
         }
     }
 
+    pub(crate) fn unnormalized_month(&self) -> u8 {
+        let (month, _) = month_day_from_year_day(self.day);
+        let month = month + 3;
+        if month > 12 {
+            month - 12
+        } else {
+            month
+        }
+    }
+
     pub(crate) fn is_leap_year(&self) -> bool {
         // Leap years are at the end of each period: quadrennium, century and cycle.
         // However, because of the way we've shifted the year so that it begins in march,
@@ -265,6 +275,21 @@ mod tests {
         assert_eq!(date.quadrennium, 24);
         assert_eq!(date.year, 2);
         assert_eq!(date.day, 364);
+    }
+
+    #[test]
+    fn test_get_unnormalized_month() {
+        let date = GregorianNormalizedDate::from_date(2000, 3, 1);
+        assert_eq!(date.unnormalized_month(), 3);
+
+        let date = GregorianNormalizedDate::from_date(2000, 2, 29);
+        assert_eq!(date.unnormalized_month(), 2);
+
+        let date = GregorianNormalizedDate::from_date(2000, 1, 1);
+        assert_eq!(date.unnormalized_month(), 1);
+
+        let date = GregorianNormalizedDate::from_date(1999, 12, 31);
+        assert_eq!(date.unnormalized_month(), 12);
     }
 
     #[test]
