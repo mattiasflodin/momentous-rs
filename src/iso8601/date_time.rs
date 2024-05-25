@@ -121,6 +121,15 @@ impl DateTime {
         }
     }
 
+    pub fn second(&self) -> u8 {
+        let boundary = SECONDS_PER_DAY - SECONDS_PER_MINUTE as u32;
+        if self.second < boundary {
+            (self.second % SECONDS_PER_MINUTE as u32) as u8
+        } else {
+            (self.second - boundary) as u8
+        }
+    }
+
     // TODO function to transfer as much carry as possible to datetime without
     // overflowing to the next component. E.g. with a second of 58 and a carry of
     // 2, the carry should be reduced to 1 and the second increased to 59.
@@ -204,5 +213,41 @@ mod tests {
             .second(60)
             .build();
         assert_eq!(date_time.minute(), 59);
+    }
+
+    #[test]
+    fn test_get_second() {
+        // Epoch
+        let date_time = DateTime::builder()
+            .year(2000)
+            .month(3)
+            .day(1)
+            .hour(0)
+            .minute(0)
+            .second(0)
+            .build();
+        assert_eq!(date_time.minute(), 0);
+
+        // Second 59 after the epoch
+        let date_time = DateTime::builder()
+            .year(2000)
+            .month(3)
+            .day(1)
+            .hour(0)
+            .minute(0)
+            .second(59)
+            .build();
+        assert_eq!(date_time.second(), 59);
+
+        // Last second of the day during a leap second
+        let date_time = DateTime::builder()
+            .year(1998)
+            .month(12)
+            .day(31)
+            .hour(23)
+            .minute(59)
+            .second(60)
+            .build();
+        assert_eq!(date_time.second(), 60);
     }
 }
