@@ -148,6 +148,21 @@ impl DateTime {
     // "falling behind" the actual time. It might matter when you're e.g.
     // adding a month to something that has fallen behind? I'm not sure.
 
+    pub fn add_years(&self, years: i128) -> DateTimeWithCarry {
+        let mut result = (*self).clone();
+        let day_carry = result.gnd.add_years(years);
+        let days_since_epoch = result.gnd.to_day();
+        result.adjust_segment(days_since_epoch);
+        let seconds_carry = result.spill_seconds_overflow(days_since_epoch);
+        DateTimeWithCarry(
+            result,
+            Carry {
+                days: day_carry as u128,
+                seconds: seconds_carry,
+            },
+        )
+    }
+
     pub fn add_months(&self, months: i128) -> DateTimeWithCarry {
         let mut result = (*self).clone();
         let day_carry = result.gnd.add_months(months);
@@ -514,6 +529,131 @@ mod tests {
             .second(60)
             .build();
         assert_eq!(date_time.second(), 60);
+    }
+
+    #[test]
+    fn add_years_to_epoch() {
+        let date_time = DateTime::builder()
+            .year(2000)
+            .month(3)
+            .day(1)
+            .hour(0)
+            .minute(0)
+            .second(0)
+            .build();
+
+        let date_time = date_time.add_years(1).unwrap();
+        assert_eq!(date_time.year(), 2001);
+        assert_eq!(date_time.month(), 3);
+        assert_eq!(date_time.day(), 1);
+        assert_eq!(date_time.hour(), 0);
+        assert_eq!(date_time.minute(), 0);
+        assert_eq!(date_time.second(), 0);
+
+        let date_time = DateTime::builder()
+            .year(2000)
+            .month(3)
+            .day(1)
+            .hour(0)
+            .minute(0)
+            .second(0)
+            .build();
+
+        let date_time = date_time.add_years(3).unwrap();
+        assert_eq!(date_time.year(), 2003);
+        assert_eq!(date_time.month(), 3);
+        assert_eq!(date_time.day(), 1);
+        assert_eq!(date_time.hour(), 0);
+        assert_eq!(date_time.minute(), 0);
+        assert_eq!(date_time.second(), 0);
+
+        let date_time = DateTime::builder()
+            .year(2000)
+            .month(3)
+            .day(1)
+            .hour(0)
+            .minute(0)
+            .second(0)
+            .build();
+
+        let date_time = date_time.add_years(4).unwrap();
+        assert_eq!(date_time.year(), 2004);
+        assert_eq!(date_time.month(), 3);
+        assert_eq!(date_time.day(), 1);
+        assert_eq!(date_time.hour(), 0);
+        assert_eq!(date_time.minute(), 0);
+        assert_eq!(date_time.second(), 0);
+    }
+
+    #[test]
+    fn add_years_to_leap_year() {
+        let date_time = DateTime::builder()
+            .year(2000)
+            .month(2)
+            .day(29)
+            .hour(0)
+            .minute(0)
+            .second(0)
+            .build();
+        let date_time = date_time.add_years(1);
+        assert_eq!(date_time.days_carry(), 1);
+        assert_eq!(date_time.seconds_carry(), 0);
+        let date_time = date_time.drop_carry();
+        assert_eq!(date_time.year(), 2001);
+        assert_eq!(date_time.month(), 2);
+        assert_eq!(date_time.day(), 28);
+        assert_eq!(date_time.hour(), 0);
+        assert_eq!(date_time.minute(), 0);
+        assert_eq!(date_time.second(), 0);
+
+        let date_time = DateTime::builder()
+            .year(2000)
+            .month(2)
+            .day(29)
+            .hour(0)
+            .minute(0)
+            .second(0)
+            .build();
+        let date_time = date_time.add_years(1);
+        assert_eq!(date_time.days_carry(), 1);
+        assert_eq!(date_time.seconds_carry(), 0);
+
+        let date_time = date_time.apply_carry();
+        assert_eq!(date_time.year(), 2001);
+        assert_eq!(date_time.month(), 3);
+        assert_eq!(date_time.day(), 1);
+        assert_eq!(date_time.hour(), 0);
+        assert_eq!(date_time.minute(), 0);
+        assert_eq!(date_time.second(), 0);
+
+        let date_time = DateTime::builder()
+            .year(2000)
+            .month(2)
+            .day(29)
+            .hour(0)
+            .minute(0)
+            .second(0)
+            .build();
+        let date_time = date_time.add_years(4).unwrap();
+        assert_eq!(date_time.year(), 2004);
+        assert_eq!(date_time.month(), 2);
+        assert_eq!(date_time.day(), 29);
+        assert_eq!(date_time.hour(), 0);
+        assert_eq!(date_time.minute(), 0);
+        assert_eq!(date_time.second(), 0);
+    }
+
+    #[test]
+    fn add_years() {
+        let date_time = DateTime::builder()
+            .year(2021)
+            .month(1)
+            .day(1)
+            .hour(0)
+            .minute(0)
+            .second(0)
+            .build();
+        date_time.add_years(1);
     }
 
     #[test]
