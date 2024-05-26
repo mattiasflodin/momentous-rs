@@ -8,7 +8,7 @@ mod div_rem;
 mod duration;
 mod gregorian_normalized_date;
 mod instant;
-mod iso8601;
+pub mod iso8601;
 mod least_common_width;
 mod period;
 mod scale;
