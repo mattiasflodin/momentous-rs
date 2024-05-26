@@ -60,6 +60,13 @@ impl DateTimeWithCarry {
     pub fn drop_carry(self) -> DateTime {
         self.0
     }
+
+    pub fn apply_carry(&self) -> DateTime {
+        let carry = self.1.clone();
+        let DateTimeWithCarry(result, carry2) = self.0.add_days(carry.days as i128);
+        assert_eq!(carry2.days, 0);
+        result.add_seconds(carry.seconds as i128 + carry2.seconds as i128)
+    }
 }
 
 #[derive(Debug, Clone)]
