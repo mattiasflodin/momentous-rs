@@ -2,7 +2,10 @@ use crate::cursor::Cursor;
 use crate::gregorian_normalized_date::GregorianNormalizedDate;
 use crate::iso8601::chronology::Chronology;
 use crate::iso8601::precision::Precision;
-use crate::iso8601::{DateTimeBuilder, HOURS_PER_DAY, SECONDS_PER_HOUR};
+use crate::iso8601::{
+    DateTimeBuilder, HOURS_PER_DAY, MINUTES_PER_HOUR, SECONDS_PER_DAY, SECONDS_PER_HOUR,
+    SECONDS_PER_MINUTE,
+};
 use crate::shared_vec_cursor::SharedVecCursor;
 use crate::zoneinfo::{get_leap_seconds, ContinuousTimeSegment};
 use std::cmp::min;
@@ -106,6 +109,18 @@ impl DateTime {
         min(hour, HOURS_PER_DAY - 1)
     }
 
+    pub fn minute(&self) -> u8 {
+        // The last minute of the day can have more than MINUTES_PER_HOUR seconds, so
+        // we need to treat that case separately.
+        let boundary = SECONDS_PER_DAY - SECONDS_PER_MINUTE as u32;
+        if self.second < boundary {
+            let seconds_into_hour = (self.second % SECONDS_PER_HOUR as u32) as u16;
+            (seconds_into_hour / MINUTES_PER_HOUR as u16) as u8
+        } else {
+            MINUTES_PER_HOUR - 1
+        }
+    }
+
     // TODO function to transfer as much carry as possible to datetime without
     // overflowing to the next component. E.g. with a second of 58 and a carry of
     // 2, the carry should be reduced to 1 and the second increased to 59.
@@ -148,5 +163,46 @@ impl DateTime {
 
         // We are no longer in the same segment, so we need to find the new current one.
         self.segment_cursor = get_leap_seconds().by_day(day);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_get_minute() {
+        // Epoch
+        let date_time = DateTime::builder()
+            .year(2000)
+            .month(3)
+            .day(1)
+            .hour(0)
+            .minute(0)
+            .second(0)
+            .build();
+        assert_eq!(date_time.minute(), 0);
+
+        // Minute 59 after the epoch
+        let date_time = DateTime::builder()
+            .year(2000)
+            .month(3)
+            .day(1)
+            .hour(0)
+            .minute(59)
+            .second(0)
+            .build();
+        assert_eq!(date_time.minute(), 59);
+
+        // Last minute of the day during a leap second
+        let date_time = DateTime::builder()
+            .year(1998)
+            .month(12)
+            .day(31)
+            .hour(23)
+            .minute(59)
+            .second(60)
+            .build();
+        assert_eq!(date_time.minute(), 59);
     }
 }
