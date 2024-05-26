@@ -141,8 +141,19 @@ impl DateTime {
     // "falling behind" the actual time. It might matter when you're e.g.
     // adding a month to something that has fallen behind? I'm not sure.
 
-    pub fn add_days(&self, days: i128) -> Self {
-        todo!()
+    pub fn add_days(&self, days: i128) -> DateTimeWithCarry {
+        let mut result = (*self).clone();
+        result.gnd.add_days(days);
+        let days_from_epoch = result.gnd.to_day();
+        result.adjust_segment(days_from_epoch);
+        let seconds_carry = result.spill_seconds_overflow(days_from_epoch);
+        DateTimeWithCarry(
+            result,
+            Carry {
+                days: 0,
+                seconds: seconds_carry,
+            },
+        )
     }
 
     pub fn add_seconds(&self, seconds: i128) -> Self {
@@ -383,6 +394,27 @@ impl DateTime {
 
         // We are no longer in the same segment, so we need to find the new current one.
         self.segment_cursor = get_leap_seconds().by_day(day);
+    }
+
+    fn spill_seconds_overflow(&mut self, days_from_epoch: i128) -> u128 {
+        if let Some(segment) = self.segment_cursor.current() {
+            let day_offset = (days_from_epoch - segment.start_day as i128) as u32;
+            let leap_seconds = if day_offset == segment.duration_days {
+                segment.leap_seconds
+            } else {
+                0
+            };
+            let day_length_s = (86_400i32 + leap_seconds as i32) as u32;
+            if self.second >= day_length_s {
+                let second_carry = self.second - day_length_s;
+                self.second = day_length_s;
+                second_carry as u128
+            } else {
+                0
+            }
+        } else {
+            0
+        }
     }
 }
 
