@@ -11,7 +11,7 @@ use crate::div_rem::ClampedDivRem;
 use crate::duration::DurationS64;
 use crate::gregorian_normalized_date::GregorianNormalizedDate;
 use crate::instant::Tick;
-use crate::iso8601::DateTime;
+use crate::iso8601::{DateTime, SECONDS_PER_DAY};
 use crate::scale::Seconds;
 use crate::widen::Widen;
 use crate::zoneinfo::{
@@ -125,7 +125,7 @@ impl Chronology {
                 .expect("at least one segment in leap second chronology");
             let segment_start: Instant<i64, Seconds> = segment.start_instant.into::<i64>();
             let segment_end = segment_start
-                + DurationS64::new(86_400) * (segment.duration_days as i64)
+                + DurationS64::new(SECONDS_PER_DAY as i64) * (segment.duration_days as i64)
                 + DurationS64::new(segment.leap_seconds as i64);
             let segment_end: Instant<_, Seconds> = segment_end.widen::<T>();
             let segment_end: Instant<_, S> = segment_end
