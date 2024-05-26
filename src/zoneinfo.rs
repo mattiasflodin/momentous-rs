@@ -154,6 +154,47 @@ impl LeapSecondChronology {
         }
     }
 
+    pub(crate) fn by_instant_with_hint<T, S: Scale>(
+        &self,
+        instant: Instant<T, S>,
+        hint: &SharedVecCursor<ContinuousTimeSegment>,
+    ) -> SharedVecCursor<ContinuousTimeSegment>
+    where
+        T: Tick + NumCmp<i32>,
+    {
+        if Arc::ptr_eq(&hint.get_shared_vec(), &self.0) {
+            // The hint is no longer valid if the underlying vector has changed.
+            return self.by_instant(instant);
+        }
+        if hint.at_start() {
+            let segment = hint.peek_next().unwrap();
+            if instant < segment.start_instant {
+                return hint.clone();
+            }
+        } else if let Some(segment) = hint.current() {
+            let segment_start = segment.start_instant;
+            let segment_end = segment_start
+                + DurationS32::new(
+                    segment.duration_days as i32 * 86_400 + segment.leap_seconds as i32,
+                );
+            if instant >= segment_start && instant < segment_end {
+                return hint.clone();
+            }
+        } else {
+            assert!(hint.at_end());
+            let segment = hint.peek_prev().unwrap();
+            let segment_start = segment.start_instant;
+            let segment_end = segment_start
+                + DurationS32::new(
+                    segment.duration_days as i32 * 86_400 + segment.leap_seconds as i32,
+                );
+            if instant >= segment_end {
+                return hint.clone();
+            }
+        }
+        self.by_instant(instant)
+    }
+
     pub fn by_day(&self, day: i128) -> SharedVecCursor<ContinuousTimeSegment> {
         let segments = self.0.as_slice();
         let search_result = segments.binary_search_by(|s| {
