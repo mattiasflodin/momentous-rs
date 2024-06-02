@@ -6,11 +6,9 @@ use lazy_static::lazy_static;
 use numcmp::NumCmp;
 use zoneinfo_compiled::{parse, TZData};
 
-use crate::cursor::Cursor;
 use crate::duration::DurationS32;
 use crate::instant::{InstantS32, Tick};
 use crate::scale::Seconds;
-use crate::shared_vec_cursor::SharedVecCursor;
 use crate::{Instant, Scale};
 
 #[derive(Debug, PartialEq, Copy, Clone)]
@@ -90,8 +88,25 @@ pub(crate) struct ContinuousTimeSegment {
     pub(crate) accumulated_leap_seconds: i32,
 }
 
+impl ContinuousTimeSegment {
+    pub(crate) fn end_day(&self) -> u32 {
+        self.start_day + self.duration_days
+    }
+
+    pub(crate) fn end_instant(&self) -> Instant<i32, Seconds> {
+        self.start_instant
+            + DurationS32::new(self.duration_days as i32 * 86_400 + self.leap_seconds as i32)
+    }
+}
+
 #[derive(Clone)]
 pub(crate) struct LeapSecondChronology(Arc<Vec<ContinuousTimeSegment>>);
+
+pub(crate) enum SegmentLookupResult<'a> {
+    BeforeFirst(&'a ContinuousTimeSegment),
+    In(&'a ContinuousTimeSegment),
+    AfterLast(&'a ContinuousTimeSegment),
+}
 
 impl LeapSecondChronology {
     fn load() -> LeapSecondChronology {
@@ -119,10 +134,7 @@ impl LeapSecondChronology {
         LeapSecondChronology(Arc::new(load_leap_segments()))
     }
 
-    pub(crate) fn by_instant<T, S: Scale>(
-        &self,
-        instant: Instant<T, S>,
-    ) -> SharedVecCursor<ContinuousTimeSegment>
+    pub(crate) fn by_instant<T, S: Scale>(&self, instant: Instant<T, S>) -> SegmentLookupResult
     where
         T: Tick + NumCmp<i32>,
     {
@@ -142,78 +154,37 @@ impl LeapSecondChronology {
             }
         });
         match search_result {
-            Ok(index) => SharedVecCursor::with_pos(self.0.clone(), index),
+            Ok(index) => SegmentLookupResult::In(&segments[index]),
             Err(index) => {
                 if index == 0 {
-                    SharedVecCursor::at_start(self.0.clone())
+                    SegmentLookupResult::BeforeFirst(&segments[0])
                 } else {
                     assert_eq!(index, segments.len());
-                    SharedVecCursor::at_end(self.0.clone())
+                    SegmentLookupResult::AfterLast(&segments[index - 1])
                 }
             }
         }
     }
 
-    pub(crate) fn by_instant_with_hint<T, S: Scale>(
-        &self,
-        instant: Instant<T, S>,
-        hint: &SharedVecCursor<ContinuousTimeSegment>,
-    ) -> SharedVecCursor<ContinuousTimeSegment>
-    where
-        T: Tick + NumCmp<i32>,
-    {
-        if Arc::ptr_eq(&hint.get_shared_vec(), &self.0) {
-            // The hint is no longer valid if the underlying vector has changed.
-            return self.by_instant(instant);
-        }
-        if hint.at_start() {
-            let segment = hint.peek_next().unwrap();
-            if instant < segment.start_instant {
-                return hint.clone();
-            }
-        } else if let Some(segment) = hint.current() {
-            let segment_start = segment.start_instant;
-            let segment_end = segment_start
-                + DurationS32::new(
-                    segment.duration_days as i32 * 86_400 + segment.leap_seconds as i32,
-                );
-            if instant >= segment_start && instant < segment_end {
-                return hint.clone();
-            }
-        } else {
-            assert!(hint.at_end());
-            let segment = hint.peek_prev().unwrap();
-            let segment_start = segment.start_instant;
-            let segment_end = segment_start
-                + DurationS32::new(
-                    segment.duration_days as i32 * 86_400 + segment.leap_seconds as i32,
-                );
-            if instant >= segment_end {
-                return hint.clone();
-            }
-        }
-        self.by_instant(instant)
-    }
-
-    pub fn by_day(&self, day: i32) -> SharedVecCursor<ContinuousTimeSegment> {
+    pub fn by_day(&self, day: i32) -> SegmentLookupResult {
         let segments = self.0.as_slice();
         let search_result = segments.binary_search_by(|s| {
             if day < s.start_day as i32 {
                 Greater
-            } else if day < (s.start_day + s.duration_days) as i32 {
+            } else if day < s.end_day() as i32 {
                 Equal
             } else {
                 Less
             }
         });
         match search_result {
-            Ok(index) => SharedVecCursor::with_pos(self.0.clone(), index),
+            Ok(index) => SegmentLookupResult::In(&segments[index]),
             Err(index) => {
                 if index == 0 {
-                    SharedVecCursor::at_start(self.0.clone())
+                    SegmentLookupResult::BeforeFirst(&segments[0])
                 } else {
                     assert_eq!(index, segments.len());
-                    SharedVecCursor::at_end(self.0.clone())
+                    SegmentLookupResult::AfterLast(&segments[index - 1])
                 }
             }
         }
@@ -267,16 +238,10 @@ pub(crate) fn get_leap_second_adjustment(unix_timestamp: i64) -> i32 {
     // there are obviously no more leap seconds.
     let leap_seconds = get_leap_seconds();
     let day = (unix_timestamp / 86400) as i32;
-    let cursor = leap_seconds.by_day(day);
-    if cursor.at_start() {
-        0
-    } else if cursor.at_end() {
-        let segment = cursor
-            .peek_prev()
-            .expect("there should be at least one leap-second segment");
-        segment.accumulated_leap_seconds
-    } else {
-        cursor.current().unwrap().accumulated_leap_seconds
+    match leap_seconds.by_day(day) {
+        SegmentLookupResult::BeforeFirst(_) => 0,
+        SegmentLookupResult::In(segment) => segment.accumulated_leap_seconds,
+        SegmentLookupResult::AfterLast(last_segment) => last_segment.accumulated_leap_seconds,
     }
 }
 
