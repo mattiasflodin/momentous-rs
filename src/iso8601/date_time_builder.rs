@@ -4,7 +4,6 @@ use std::cmp::max;
 use crate::iso8601::chronology::{load_chronology, Chronology};
 use crate::iso8601::precision::Precision;
 use crate::iso8601::DateTime;
-use crate::zoneinfo::get_leap_seconds;
 
 #[derive(Default)]
 pub struct DateTimeBuilder {
@@ -152,16 +151,7 @@ impl DateTimeBuilder {
         let second = hour as u32 * 3600 + minute as u32 * 60 + second as u32;
         let nanosecond =
             millisecond as u32 * 1_000_000 + microsecond as u32 * 1_000 + nanosecond as u32;
-        let leap_second_chronology = get_leap_seconds();
-        let segment_cursor = leap_second_chronology.by_day(gnd.to_day());
-        DateTime::new(
-            chronology,
-            precision,
-            gnd,
-            second,
-            nanosecond,
-            segment_cursor,
-        )
+        DateTime::new(chronology, precision, gnd, second, nanosecond)
     }
 }
 
