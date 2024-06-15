@@ -7,9 +7,10 @@ use crate::iso8601::{
     DateTimeBuilder, HOURS_PER_DAY, MINUTES_PER_HOUR, SECONDS_PER_DAY, SECONDS_PER_HOUR,
     SECONDS_PER_MINUTE,
 };
-use crate::zoneinfo::{get_leap_seconds, SegmentLookupResult};
+use crate::zoneinfo::SegmentLookupResult;
 use num_integer::Integer;
 use std::cmp::min;
+use std::fmt::{Debug, Formatter};
 
 #[derive(Debug, Clone)]
 pub struct Carry {
@@ -70,7 +71,7 @@ impl DateTimeWithCarry {
 }
 
 /// An ISO 8601 date and time. The range is from 0000-01-01 to 9999-12-31.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct DateTime {
     // - P Precision: 13, 4 bits
     // - E cycle: 25 [-1-23], 5 bits
@@ -87,6 +88,17 @@ pub struct DateTime {
     w0: u64,
     w1: u16,
     chronology: Chronology,
+}
+
+impl Debug for DateTime {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let (precision, gnd, second, nanosecond) = Self::unpack(self.w0, self.w1);
+        write!(
+            f,
+            "DateTime {{ precision: {:?}, gnd: {:?}, second: {}, nanosecond: {} }}",
+            precision, gnd, second, nanosecond
+        )
+    }
 }
 
 impl DateTime {
@@ -317,8 +329,9 @@ impl DateTime {
 
     pub fn add_seconds(&self, seconds: i64) -> Self {
         let (precision, gnd, second, nanosecond) = Self::unpack0(self.w0);
-        let instant = Self::to_second_instant(gnd, second);
-        let (gnd, second) = Self::from_second_instant(instant + DurationS64::new(seconds));
+        let instant = self.to_second_instant(gnd, second);
+        let (gnd, second) =
+            Self::from_second_instant(instant + DurationS64::new(seconds), &self.chronology);
         let w0 = Self::pack0(precision, gnd, second, nanosecond);
         DateTime {
             w0,
@@ -332,13 +345,8 @@ impl DateTime {
     }
 
     #[allow(clippy::wrong_self_convention)]
-    fn to_second_instant(gnd: GregorianNormalizedDate, second: u32) -> InstantS64 {
-        // TODO store leap seconds reference in chronology object so we don't have to take
-        // a lock each time we fetch it, and don't get unpredictable handling of leap seconds.
-        // If the leap second table is updated, it should be incorporated into the chronology
-        // at a deterministic point, not whenever the table is fetched.
-
-        let leap_second_chronology = get_leap_seconds();
+    fn to_second_instant(&self, gnd: GregorianNormalizedDate, second: u32) -> InstantS64 {
+        let leap_second_chronology = self.chronology.leap_seconds();
         let day = gnd.to_day();
         let seconds_since_epoch = match leap_second_chronology.by_day(day) {
             SegmentLookupResult::AfterLast(last_segment) => {
@@ -366,10 +374,13 @@ impl DateTime {
         InstantS64::from_ticks_since_epoch(seconds_since_epoch)
     }
 
-    fn from_second_instant(instant: InstantS64) -> (GregorianNormalizedDate, u32) {
+    fn from_second_instant(
+        instant: InstantS64,
+        chronology: &Chronology,
+    ) -> (GregorianNormalizedDate, u32) {
         // TODO handle leap-second overshoot on the last day of the segment; see add_seconds code.
         // TODO leap-second smearing
-        let leap_second_chronology = get_leap_seconds();
+        let leap_second_chronology = chronology.leap_seconds();
         match leap_second_chronology.by_instant(instant) {
             SegmentLookupResult::AfterLast(last_segment) => {
                 // The instant is past the last known leap-second segment, so we calculate the number
@@ -436,7 +447,7 @@ impl DateTime {
     fn spill_second_overflow(&self, gnd: &GregorianNormalizedDate, second: u32) -> (u32, u32) {
         // TODO can the seconds overflow become extremely large, like thousands of years? If so
         // we need a larger return type here, and probably some kind of fix to the logic.
-        let leap_second_chronology = get_leap_seconds();
+        let leap_second_chronology = self.chronology.leap_seconds();
         let days_from_epoch = gnd.to_day();
         if let SegmentLookupResult::In(segment) = leap_second_chronology.by_day(days_from_epoch) {
             let day_offset = (days_from_epoch - segment.start_day as i32) as u32;

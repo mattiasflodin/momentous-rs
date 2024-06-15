@@ -1,15 +1,13 @@
 use std::cmp::Ordering::{Equal, Greater, Less};
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
 
-use lazy_static::lazy_static;
 use numcmp::NumCmp;
 use zoneinfo_compiled::{parse, TZData};
 
 use crate::duration::DurationS32;
 use crate::instant::{InstantS32, Tick};
 use crate::scale::Seconds;
-use crate::{Instant, Scale};
+use crate::{iso8601, Instant, Scale};
 
 #[derive(Debug, PartialEq, Copy, Clone)]
 pub(crate) struct LeapSecond {
@@ -48,28 +46,10 @@ fn tzdir() -> PathBuf {
 }
 
 pub(crate) fn load_zoneinfo(name: &str) -> TZData {
+    // TODO this won't work on MacOS.
     let path = tzdir().join("right").join(name);
     let data = std::fs::read(path).expect("failed to read zoneinfo file");
     parse(data).expect("failed to parse zoneinfo file")
-}
-
-lazy_static! {
-    // TODO store expiration time and fire of a thread to refresh the cache
-    // (or just load it during application start up). Need to also track
-    // whether some thread is already refreshing the cache so we don't
-    // fire up multiple threads. leap_seconds needs to be an Option.
-    static ref LEAP_SECONDS: Mutex<LeapSecondChronology> = {
-        let leap_seconds = LeapSecondChronology::load();
-        Mutex::new(leap_seconds)
-    };
-    static ref LEAP_SECOND_SEGMENTS: Arc<Vec<ContinuousTimeSegment>> = {
-        Arc::new(load_leap_segments())
-    };
-}
-
-pub(crate) fn get_leap_seconds() -> LeapSecondChronology {
-    let leap_seconds = LEAP_SECONDS.lock().unwrap();
-    leap_seconds.clone()
 }
 
 /// A segment of time that ends with a leap second adjustment on the last day.
@@ -99,13 +79,71 @@ impl ContinuousTimeSegment {
     }
 }
 
-#[derive(Clone)]
-pub(crate) struct LeapSecondChronology(Arc<Vec<ContinuousTimeSegment>>);
+pub(crate) struct LeapSecondChronology(pub(crate) Vec<ContinuousTimeSegment>);
 
 pub(crate) enum SegmentLookupResult<'a> {
     BeforeFirst(&'a ContinuousTimeSegment),
     In(&'a ContinuousTimeSegment),
     AfterLast(&'a ContinuousTimeSegment),
+}
+
+pub(crate) fn lookup_leap_second_segment_by_instant<T, S: Scale>(
+    segments: &[ContinuousTimeSegment],
+    instant: Instant<T, S>,
+) -> SegmentLookupResult
+where
+    T: Tick + NumCmp<i32>,
+{
+    let instant: Instant<T, Seconds> = instant.floor();
+    let search_result = segments.binary_search_by(|s| {
+        if instant < s.start_instant {
+            Greater
+        } else if instant
+            < s.start_instant
+                + DurationS32::new(s.duration_days as i32 * 86_400 + s.leap_seconds as i32)
+        {
+            Equal
+        } else {
+            Less
+        }
+    });
+    match search_result {
+        Ok(index) => SegmentLookupResult::In(&segments[index]),
+        Err(index) => {
+            if index == 0 {
+                SegmentLookupResult::BeforeFirst(&segments[0])
+            } else {
+                assert_eq!(index, segments.len());
+                SegmentLookupResult::AfterLast(&segments[index - 1])
+            }
+        }
+    }
+}
+
+pub fn lookup_leap_second_segment_by_day(
+    segments: &[ContinuousTimeSegment],
+    day: i32,
+) -> SegmentLookupResult {
+    let search_result = segments.binary_search_by(|s| {
+        if day < s.start_day as i32 {
+            Greater
+        } else if day < s.end_day() as i32 {
+            Equal
+        } else {
+            Less
+        }
+    });
+    match search_result {
+        Ok(index) => SegmentLookupResult::In(&segments[index]),
+        Err(index) => {
+            if index == 0 {
+                SegmentLookupResult::BeforeFirst(&segments[0])
+            } else {
+                assert_eq!(index, segments.len());
+                SegmentLookupResult::AfterLast(&segments[index - 1])
+            }
+        }
+    }
 }
 
 impl LeapSecondChronology {
@@ -131,67 +169,22 @@ impl LeapSecondChronology {
             .collect();
         vec.sort_by(|a, b| a.unix_timestamp.cmp(&b.unix_timestamp)); // Most likely already sorted but just in case
                                                                      // TODO what's all of the above for !?
-        LeapSecondChronology(Arc::new(load_leap_segments()))
+        LeapSecondChronology(load_leap_segments())
     }
 
     pub(crate) fn by_instant<T, S: Scale>(&self, instant: Instant<T, S>) -> SegmentLookupResult
     where
         T: Tick + NumCmp<i32>,
     {
-        let segments = self.0.as_slice();
-        let instant: Instant<T, Seconds> = instant.floor();
-
-        let search_result = segments.binary_search_by(|s| {
-            if instant < s.start_instant {
-                Greater
-            } else if instant
-                < s.start_instant
-                    + DurationS32::new(s.duration_days as i32 * 86_400 + s.leap_seconds as i32)
-            {
-                Equal
-            } else {
-                Less
-            }
-        });
-        match search_result {
-            Ok(index) => SegmentLookupResult::In(&segments[index]),
-            Err(index) => {
-                if index == 0 {
-                    SegmentLookupResult::BeforeFirst(&segments[0])
-                } else {
-                    assert_eq!(index, segments.len());
-                    SegmentLookupResult::AfterLast(&segments[index - 1])
-                }
-            }
-        }
+        lookup_leap_second_segment_by_instant(&self.0, instant)
     }
 
     pub fn by_day(&self, day: i32) -> SegmentLookupResult {
-        let segments = self.0.as_slice();
-        let search_result = segments.binary_search_by(|s| {
-            if day < s.start_day as i32 {
-                Greater
-            } else if day < s.end_day() as i32 {
-                Equal
-            } else {
-                Less
-            }
-        });
-        match search_result {
-            Ok(index) => SegmentLookupResult::In(&segments[index]),
-            Err(index) => {
-                if index == 0 {
-                    SegmentLookupResult::BeforeFirst(&segments[0])
-                } else {
-                    assert_eq!(index, segments.len());
-                    SegmentLookupResult::AfterLast(&segments[index - 1])
-                }
-            }
-        }
+        lookup_leap_second_segment_by_day(&self.0, day)
     }
 }
 
-fn load_leap_segments() -> Vec<ContinuousTimeSegment> {
+pub(crate) fn load_leap_segments() -> Vec<ContinuousTimeSegment> {
     // On OS:es that don't have a zoneinfo directory we likely won't be able
     // to get a list of leap seconds for each time zone. Windows, for example, only
     // tracks one set of leap seconds for all time zones.
@@ -233,60 +226,19 @@ fn load_leap_segments() -> Vec<ContinuousTimeSegment> {
     segments
 }
 
-pub(crate) fn get_leap_second_adjustment(unix_timestamp: i64) -> i32 {
+pub(crate) fn get_leap_second_adjustment_for_unix_timestamp(unix_timestamp: i64) -> i32 {
     // TODO can cast unix_timestamp to i32 here. If it's outside the range of the leap second array then
     // there are obviously no more leap seconds.
-    let leap_seconds = get_leap_seconds();
-    let day = (unix_timestamp / 86400) as i32;
+    // TODO we need to make sure this is cached and possibly even have special treatment for
+    // the leap-second chronology (which is the same for all time zones), to reduce latency.
+    // Also... iso8601 seems a bit too specific for a function like this.
+    let utc = iso8601::load_chronology("UTC");
+    let leap_seconds = utc.leap_seconds();
+
+    let day = (unix_timestamp / 86_400) as i32;
     match leap_seconds.by_day(day) {
         SegmentLookupResult::BeforeFirst(_) => 0,
         SegmentLookupResult::In(segment) => segment.accumulated_leap_seconds,
         SegmentLookupResult::AfterLast(last_segment) => last_segment.accumulated_leap_seconds,
-    }
-}
-
-/*pub(crate) fn get_leap_second_segment(instant: Instant<i128, Nanoseconds>) -> Option<&'static ContinuousTimeSegment> {
-    let segments = LEAP_SECOND_SEGMENTS.as_ref();
-    let index = segments.partition_point(|s| s.start_instant <= instant);
-    if index == 0 {
-        return None;
-    }
-    let segment = &segments[index - 1];
-    let segment_duration_seconds = segment.duration_days as i128 * 86_400 + segment.leap_seconds as i128;
-    if instant < segment.start_instant + DurationNs128::from_seconds(segment_duration_seconds) {
-        Some(segment)
-    } else {
-        None
-    }
-}
-
-pub(crate) fn get_leap_second_segments_since_instant(instant: Instant<i128, Nanoseconds>) -> &'static [ContinuousTimeSegment] {
-    let segments = LEAP_SECOND_SEGMENTS.as_ref();
-    let index = segments.partition_point(|s| s.start_instant <= instant);
-    if index == 0 {
-        &segments
-    } else {
-        &segments[index - 1..]
-    }
-}
-*/
-pub(crate) fn get_leap_second_segments_since_day(day: u32) -> &'static [ContinuousTimeSegment] {
-    let segments = LEAP_SECOND_SEGMENTS.as_ref();
-    let index = segments.partition_point(|s| s.start_day <= day);
-    if index == 0 {
-        segments
-    } else {
-        &segments[index - 1..]
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn it_works() {
-        let leap_seconds = get_leap_seconds();
-        assert!(leap_seconds.0.len() > 0);
     }
 }
