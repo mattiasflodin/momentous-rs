@@ -30,15 +30,15 @@ use num_integer::Integer;
 pub(crate) struct GregorianNormalizedDate {
     // Number of 400-year cycles since 2000-03-01. We need to support dates from 0000-03-01 to
     // 9999-02-29; it turns out that 8 bits is enough to represent this, as 400*127 = 50800.
-    cycle: i8,
+    pub(crate) cycle: i8,
     // Number of centuries since the start of the cycle (0-3)
-    century: u8,
+    pub(crate) century: u8,
     // Number of quadrennia (4-year periods) since the start of the century (0-24).
-    quadrennium: u8,
+    pub(crate) quadrennium: u8,
     // Number of years since the start of the quadrennium (0-3).
-    year: u8,
+    pub(crate) year: u8,
     // Number of days since the start of the year (0-366, where the year starts March 1).
-    day: u16,
+    pub(crate) day: u16,
 }
 
 const GREGORIAN_CYCLE_DAYS: u32 = 97 * 366 + 303 * 365;

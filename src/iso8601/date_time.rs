@@ -72,14 +72,126 @@ impl DateTimeWithCarry {
 /// An ISO 8601 date and time. The range is from 0000-01-01 to 9999-12-31.
 #[derive(Debug, Clone)]
 pub struct DateTime {
+    // - P Precision: 13, 4 bits
+    // - E cycle: 25 [-1-23], 5 bits
+    // - C century: 3, 2 bits
+    // - Q quadrennium: 24, 5 bits
+    // - Y year: 4, 2 bits
+    // - D day: 366, 9 bits
+    // - S second: 86400+, 17 bits
+    // - N nanosecond: 1_000_000_000, 30 bits
+    //
+    // | w0 ------------------------------------------------------------------------------------|| w1 -----------------|
+    // | Byte 7   | Byte 6   | Byte 5   | Byte 4   || Byte 3   | Byte 2   | Byte 1   | Byte 0   || Byte 1   | Byte 0   |
+    // | ..NNNNNN | NNNNNNNN | ...PPPPS | EEEEECCQ || QQQQQYYD | DDDDDDDD | SSSSSSSS | SSSSSSSS || NNNNNNNN | NNNNNNNN |
+    w0: u64,
+    w1: u16,
     chronology: Chronology,
-    precision: Precision,
-    gnd: GregorianNormalizedDate,
-    second: u32,
-    nanosecond: u32,
 }
 
 impl DateTime {
+    fn pack(
+        precision: Precision,
+        gnd: GregorianNormalizedDate,
+        second: u32,
+        nanosecond: u32,
+    ) -> (u64, u16) {
+        // Cycle is based at 2000-03-01, we need to rebase it to -400-03-01 which is
+        // 6 centuries earlier.
+        let w0 = Self::pack0(precision, gnd, second, nanosecond);
+        let w1 = (nanosecond & 0xFFFF) as u16;
+        (w0, w1)
+    }
+
+    fn unpack(w0: u64, w1: u16) -> (Precision, GregorianNormalizedDate, u32, u32) {
+        let (precision, gnd, second, nanosecond) = Self::unpack0(w0);
+        let nanosecond = nanosecond | w1 as u32;
+        (precision, gnd, second, nanosecond)
+    }
+
+    fn pack0(
+        precision: Precision,
+        gnd: GregorianNormalizedDate,
+        second: u32,
+        nanosecond: u32,
+    ) -> u64 {
+        let p = Self::encode_precision(precision);
+        // Cycle is based at 2000-03-01, we need to rebase it to -400-03-01 which is
+        // 6 centuries earlier.
+        let cycle = gnd.cycle;
+        let century = gnd.century;
+        let quadrennium = gnd.quadrennium;
+        let year = gnd.year;
+        let day = gnd.day;
+        let rebased_cycle = cycle as i32 + 6;
+        ((nanosecond & 0x7FFF0000) as u64) << 48
+            | (p as u64) << 41
+            | ((second & 0x10000) as u64) << 40
+            | ((rebased_cycle & 0x1F) as u64) << 35
+            | ((century & 0x3) as u64) << 33
+            | ((quadrennium & 0x1F) as u64) << 27
+            | ((year & 0x3) as u64) << 25
+            | ((day & 0x1FF) as u64) << 16
+            | (second & 0xFFFF) as u64
+    }
+
+    fn unpack0(w0: u64) -> (Precision, GregorianNormalizedDate, u32, u32) {
+        let lower_second = (w0 & 0xFFFF) as u32;
+        let day = ((w0 >> 16) & 0x1FF) as u16;
+        let year = ((w0 >> 25) & 0x3) as u8;
+        let quadrennium = ((w0 >> 27) & 0x1F) as u8;
+        let century = ((w0 >> 33) & 0x3) as u8;
+        let cycle = ((w0 >> 35) & 0x1F) as i8 - 6;
+        let second = ((w0 >> 40) & 0x10000) as u32 | lower_second;
+        let precision = Self::decode_precision((w0 >> 41) as u8);
+        let nanosecond = ((w0 >> 48) & 0x7FFF0000) as u32;
+        let gnd = GregorianNormalizedDate {
+            cycle,
+            century,
+            quadrennium,
+            year,
+            day,
+        };
+        (precision, gnd, second, nanosecond)
+    }
+
+    fn encode_precision(precision: Precision) -> u8 {
+        match precision {
+            Precision::Millennia => 0,
+            Precision::Centuries => 1,
+            Precision::Decades => 2,
+            Precision::Years => 3,
+            Precision::Months => 4,
+            Precision::Weeks => 5,
+            Precision::Days => 6,
+            Precision::Hours => 7,
+            Precision::Minutes => 8,
+            Precision::Seconds => 9,
+            Precision::Milliseconds => 10,
+            Precision::Microseconds => 11,
+            Precision::Nanoseconds => 12,
+        }
+    }
+
+    fn decode_precision(precision: u8) -> Precision {
+        match precision {
+            0 => Precision::Millennia,
+            1 => Precision::Centuries,
+            2 => Precision::Decades,
+            3 => Precision::Years,
+            4 => Precision::Months,
+            5 => Precision::Weeks,
+            6 => Precision::Days,
+            7 => Precision::Hours,
+            8 => Precision::Minutes,
+            9 => Precision::Seconds,
+            10 => Precision::Milliseconds,
+            11 => Precision::Microseconds,
+            12 => Precision::Nanoseconds,
+            _ => panic!("Invalid precision"),
+        }
+    }
+
     pub fn builder() -> DateTimeBuilder {
         DateTimeBuilder::new()
     }
@@ -91,38 +203,38 @@ impl DateTime {
         second: u32,
         nanosecond: u32,
     ) -> Self {
-        DateTime {
-            chronology,
-            precision,
-            gnd,
-            second,
-            nanosecond,
-        }
+        let (w0, w1) = Self::pack(precision, gnd, second, nanosecond);
+        DateTime { w0, w1, chronology }
     }
 
     pub fn year(&self) -> u16 {
-        self.gnd.unnormalized_year()
+        let (_, gnd, _, _) = Self::unpack0(self.w0);
+        gnd.unnormalized_year()
     }
 
     pub fn month(&self) -> u8 {
-        self.gnd.unnormalized_month()
+        let (_, gnd, _, _) = Self::unpack0(self.w0);
+        gnd.unnormalized_month()
     }
 
     pub fn day(&self) -> u8 {
-        self.gnd.unnormalized_day()
+        let (_, gnd, _, _) = Self::unpack0(self.w0);
+        gnd.unnormalized_day()
     }
 
     pub fn hour(&self) -> u8 {
-        let hour = (self.second / SECONDS_PER_HOUR as u32) as u8;
+        let (_, _, second, _) = Self::unpack0(self.w0);
+        let hour = (second / SECONDS_PER_HOUR as u32) as u8;
         min(hour, HOURS_PER_DAY - 1)
     }
 
     pub fn minute(&self) -> u8 {
+        let (_, _, second, _) = Self::unpack0(self.w0);
         // The last minute of the day can have more than MINUTES_PER_HOUR seconds, so
         // we need to treat that case separately.
         let boundary = SECONDS_PER_DAY - SECONDS_PER_MINUTE as u32;
-        if self.second < boundary {
-            let seconds_into_hour = (self.second % SECONDS_PER_HOUR as u32) as u16;
+        if second < boundary {
+            let seconds_into_hour = (second % SECONDS_PER_HOUR as u32) as u16;
             (seconds_into_hour / MINUTES_PER_HOUR as u16) as u8
         } else {
             MINUTES_PER_HOUR - 1
@@ -130,11 +242,12 @@ impl DateTime {
     }
 
     pub fn second(&self) -> u8 {
+        let (_, _, second, _) = Self::unpack0(self.w0);
         let boundary = SECONDS_PER_DAY - SECONDS_PER_MINUTE as u32;
-        if self.second < boundary {
-            (self.second % SECONDS_PER_MINUTE as u32) as u8
+        if second < boundary {
+            (second % SECONDS_PER_MINUTE as u32) as u8
         } else {
-            (self.second - boundary) as u8
+            (second - boundary) as u8
         }
     }
 
@@ -147,10 +260,15 @@ impl DateTime {
     // adding a month to something that has fallen behind? I'm not sure.
 
     pub fn add_years(&self, years: i16) -> DateTimeWithCarry {
-        let mut result = (*self).clone();
-        let day_carry = result.gnd.add_years(years);
-        let days_since_epoch = result.gnd.to_day();
-        let seconds_carry = result.spill_seconds_overflow(days_since_epoch);
+        let (precision, mut gnd, second, nanosecond) = Self::unpack0(self.w0);
+        let day_carry = gnd.add_years(years);
+        let (second, seconds_carry) = self.spill_second_overflow(&gnd, second);
+        let w0 = Self::pack0(precision, gnd, second, nanosecond);
+        let result = DateTime {
+            w0,
+            w1: self.w1,
+            chronology: self.chronology.clone(),
+        };
         DateTimeWithCarry(
             result,
             Carry {
@@ -161,10 +279,14 @@ impl DateTime {
     }
 
     pub fn add_months(&self, months: i32) -> DateTimeWithCarry {
-        let mut result = (*self).clone();
-        let day_carry = result.gnd.add_months(months);
-        let days_from_epoch = result.gnd.to_day();
-        let seconds_carry = result.spill_seconds_overflow(days_from_epoch);
+        let (precision, mut gnd, second, nanosecond) = Self::unpack0(self.w0);
+        let day_carry = gnd.add_months(months);
+        let (second, seconds_carry) = self.spill_second_overflow(&gnd, second);
+        let result = DateTime {
+            w0: Self::pack0(precision, gnd, second, nanosecond),
+            w1: self.w1,
+            chronology: self.chronology.clone(),
+        };
         DateTimeWithCarry(
             result,
             Carry {
@@ -175,10 +297,14 @@ impl DateTime {
     }
 
     pub fn add_days(&self, days: i32) -> DateTimeWithCarry {
-        let mut result = (*self).clone();
-        result.gnd.add_days(days);
-        let days_from_epoch = result.gnd.to_day();
-        let seconds_carry = result.spill_seconds_overflow(days_from_epoch);
+        let (precision, mut gnd, second, nanosecond) = Self::unpack0(self.w0);
+        gnd.add_days(days);
+        let (second, seconds_carry) = self.spill_second_overflow(&gnd, second);
+        let result = DateTime {
+            w0: Self::pack0(precision, gnd, second, nanosecond),
+            w1: self.w1,
+            chronology: self.chronology.clone(),
+        };
         DateTimeWithCarry(
             result,
             Carry {
@@ -189,14 +315,14 @@ impl DateTime {
     }
 
     pub fn add_seconds(&self, seconds: i64) -> Self {
-        let instant = self.into_second_instant();
+        let (precision, gnd, second, nanosecond) = Self::unpack0(self.w0);
+        let instant = Self::to_second_instant(gnd, second);
         let (gnd, second) = Self::from_second_instant(instant + DurationS64::new(seconds));
+        let w0 = Self::pack0(precision, gnd, second, nanosecond);
         DateTime {
+            w0,
+            w1: self.w1,
             chronology: self.chronology.clone(),
-            precision: self.precision,
-            gnd,
-            second,
-            nanosecond: self.nanosecond,
         }
     }
 
@@ -205,19 +331,19 @@ impl DateTime {
     }
 
     #[allow(clippy::wrong_self_convention)]
-    fn into_second_instant(&self) -> InstantS64 {
+    fn to_second_instant(gnd: GregorianNormalizedDate, second: u32) -> InstantS64 {
         // TODO store leap seconds reference in chronology object so we don't have to take
         // a lock each time we fetch it, and don't get unpredictable handling of leap seconds.
         // If the leap second table is updated, it should be incorporated into the chronology
         // at a deterministic point, not whenever the table is fetched.
 
         let leap_second_chronology = get_leap_seconds();
-        let day = self.gnd.to_day();
+        let day = gnd.to_day();
         let seconds_since_epoch = match leap_second_chronology.by_day(day) {
             SegmentLookupResult::AfterLast(last_segment) => {
                 let days_since_last_segment = day as u32 - last_segment.end_day();
                 let seconds_since_last_segment =
-                    days_since_last_segment as u64 * SECONDS_PER_DAY as u64 + self.second as u64;
+                    days_since_last_segment as u64 * SECONDS_PER_DAY as u64 + second as u64;
                 let last_segment_end = last_segment.end_instant().ticks_since_epoch() as u64;
                 (last_segment_end + seconds_since_last_segment) as i64
             }
@@ -225,13 +351,13 @@ impl DateTime {
                 let days_into_segment = (day - segment.start_day as i32) as u32;
                 segment.start_instant.ticks_since_epoch() as i64
                     + days_into_segment as i64 * SECONDS_PER_DAY as i64
-                    + self.second as i64
+                    + second as i64
             }
             SegmentLookupResult::BeforeFirst(first_segment) => {
                 let days_to_first_segment = (first_segment.start_day as i32 - (day + 1)) as u32;
                 let seconds_to_first_segment = days_to_first_segment as u64
                     * SECONDS_PER_DAY as u64
-                    + ((SECONDS_PER_DAY - self.second) as u64);
+                    + ((SECONDS_PER_DAY - second) as u64);
                 first_segment.start_instant.ticks_since_epoch() as i64
                     - seconds_to_first_segment as i64
             }
@@ -306,10 +432,11 @@ impl DateTime {
         }
     }
 
-    fn spill_seconds_overflow(&mut self, days_from_epoch: i32) -> u32 {
+    fn spill_second_overflow(&self, gnd: &GregorianNormalizedDate, second: u32) -> (u32, u32) {
         // TODO can the seconds overflow become extremely large, like thousands of years? If so
         // we need a larger return type here, and probably some kind of fix to the logic.
         let leap_second_chronology = get_leap_seconds();
+        let days_from_epoch = gnd.to_day();
         if let SegmentLookupResult::In(segment) = leap_second_chronology.by_day(days_from_epoch) {
             let day_offset = (days_from_epoch - segment.start_day as i32) as u32;
             let leap_seconds = if day_offset == segment.duration_days {
@@ -318,15 +445,14 @@ impl DateTime {
                 0
             };
             let day_length_s = (SECONDS_PER_DAY as i32 + leap_seconds as i32) as u32;
-            if self.second >= day_length_s {
-                let second_carry = self.second - day_length_s;
-                self.second = day_length_s;
-                second_carry
+            if second >= day_length_s {
+                let second_carry = second - day_length_s;
+                (day_length_s, second_carry)
             } else {
-                0
+                (second, 0)
             }
         } else {
-            0
+            (second, 0)
         }
     }
 }
