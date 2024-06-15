@@ -204,6 +204,7 @@ impl DateTime {
         todo!()
     }
 
+    #[allow(clippy::wrong_self_convention)]
     fn into_second_instant(&self) -> InstantS64 {
         // TODO store leap seconds reference in chronology object so we don't have to take
         // a lock each time we fetch it, and don't get unpredictable handling of leap seconds.
