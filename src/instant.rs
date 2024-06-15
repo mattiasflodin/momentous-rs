@@ -10,7 +10,7 @@ use thiserror::Error;
 
 use crate::scale::Seconds;
 use crate::widen::Widen;
-use crate::zoneinfo::get_leap_second_adjustment;
+use crate::zoneinfo::get_leap_second_adjustment_for_unix_timestamp;
 use crate::Nanoseconds;
 use crate::{Duration, Scale};
 
@@ -332,7 +332,7 @@ impl<T: Tick, S: Scale> TryFrom<SystemTime> for Instant<T, S> {
 
         let (mut seconds, subsecond_ns) = system_time_to_time_t(value);
         if !system_time_includes_leap_seconds() {
-            seconds += get_leap_second_adjustment(seconds) as i64;
+            seconds += get_leap_second_adjustment_for_unix_timestamp(seconds) as i64;
         }
 
         // FIXME report proper error here
