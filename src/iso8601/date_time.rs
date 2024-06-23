@@ -188,7 +188,8 @@ impl DateTime {
             10 => Precision::Milliseconds,
             11 => Precision::Microseconds,
             12 => Precision::Nanoseconds,
-            _ => panic!("Invalid precision"),
+            // Should never happen but we don't need to confuse the optimizer with a panic here.
+            _ => Precision::Nanoseconds,
         }
     }
 
