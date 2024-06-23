@@ -359,8 +359,9 @@ mod tests {
     fn test_gregorian_normalized_date() {
         // 1970-01-01, the zero-point of unix time.
         let date = GregorianNormalizedDate::from_day(0);
-        // Because normalized years start in march, the normalized representation will be based on the year 1969.
-        // 2000 -1*400 + 3*100 + 17*4 + 1 = 1969.
+        // Because normalized years start in March, the normalized representation will be
+        // the year 1969.
+        // 2000 - 1*400 + 3*100 + 17*4 + 1 = 1969.
         assert_eq!(date.cycle, -1);
         assert_eq!(date.century, 3);
         assert_eq!(date.quadrennium, 17);
