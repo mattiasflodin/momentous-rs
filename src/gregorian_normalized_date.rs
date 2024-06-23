@@ -53,20 +53,25 @@ const GREGORIAN_CENTURY_QUADRENNIUMS: u8 = 25;
 const GREGORIAN_QUADRENNIUM_YEARS: u8 = 4;
 
 const GREGORIAN_NORMALIZED_DATE_OFFSET_DAYS: u16 = 11017; // 11017 days from 1970-01-01 to 2000-03-01
-const GREGORIAN_MONTH_STARTS: [u16; 13] =
-    [0, 31, 61, 92, 122, 153, 184, 214, 245, 275, 306, 337, 65535]; // Index 0 = March
-const GREGORIAN_MONTH_LENGTHS: [u8; 11] = [31, 30, 31, 30, 31, 31, 30, 31, 30, 31, 31];
 const JANUARY_1_DAY_OFFSET: u16 = 306;
 
-fn month_day_from_year_day(day: u16) -> (u8, u8) {
-    let mut month = (day / 30) as u8;
-    let mut month_start_day = GREGORIAN_MONTH_STARTS[month as usize];
-    if day < month_start_day {
-        // We have overshot the month. Move back.
-        month -= 1;
-        month_start_day = GREGORIAN_MONTH_STARTS[month as usize];
-    }
-    (month, (day - month_start_day) as u8)
+fn month_from_year_day(day: u16) -> u8 {
+    // TODO explain this further. It is according to formula 1.90 of section
+    // 1.14 of "Calendrical Calculations" by Rengold and Dershowitz. The
+    // parameters are chosen according to the March/March Gregorian year of
+    // table 1.4. However, we have made the month zero-based.
+    ((5 * day + 2) / 153) as u8
+}
+
+fn year_day_from_month(month: u8) -> u16 {
+    (153 * month as u16 + 2) / 5
+}
+
+fn month_day_from_year_day(year_day: u16) -> (u8, u8) {
+    let month = month_from_year_day(year_day);
+    let month_start_day = year_day_from_month(month);
+    let day = (year_day - month_start_day) as u8;
+    (month, day)
 }
 
 impl GregorianNormalizedDate {
@@ -137,7 +142,7 @@ impl GregorianNormalizedDate {
             years_into_century.clamped_div_rem(GREGORIAN_QUADRENNIUM_YEARS as u16, 24_u8);
         let years_into_quadrennium = years_into_quadrennium as u8; // 2^2 years per quadrennium
 
-        let month_day_offset = GREGORIAN_MONTH_STARTS[month as usize];
+        let month_day_offset = year_day_from_month(month);
         let days_into_year = month_day_offset + day as u16;
         GregorianNormalizedDate {
             cycle,
@@ -160,7 +165,7 @@ impl GregorianNormalizedDate {
         // affect the month start since the leap day comes at the end of the year.
         let (mut month, days_into_month) = month_day_from_year_day(self.day);
 
-        // Now adjust so march is represented as month 3 instead of month 1, since we want to be based off of the Gregorian new year.
+        // Adjust so march is represented as month 3 instead of month 1, since we want to be based off of the Gregorian new year.
         month += 2;
         if month >= 12 {
             month -= 12;
@@ -170,10 +175,9 @@ impl GregorianNormalizedDate {
     }
 
     pub(crate) fn days_in_month(&self) -> u8 {
-        let (month, _) = month_day_from_year_day(self.day);
+        let month = month_from_year_day(self.day);
         if month < 11 {
-            (GREGORIAN_MONTH_STARTS[(month + 1) as usize] - GREGORIAN_MONTH_STARTS[month as usize])
-                as u8
+            (year_day_from_month(month + 1) - year_day_from_month(month)) as u8
         } else if self.is_leap_year() {
             29
         } else {
@@ -199,8 +203,7 @@ impl GregorianNormalizedDate {
     }
 
     pub(crate) fn unnormalized_month(&self) -> u8 {
-        let (month, _) = month_day_from_year_day(self.day);
-        let month = month + 3;
+        let month = month_from_year_day(self.day) + 3;
         if month > 12 {
             month - 12
         } else {
@@ -271,8 +274,7 @@ impl GregorianNormalizedDate {
 
     // Returns day carry
     pub(crate) fn add_months(&mut self, months: i32) -> u8 {
-        let (month, _) = month_day_from_year_day(self.day);
-        let day_in_month = (self.day - GREGORIAN_MONTH_STARTS[month as usize]) as u8;
+        let (month, day_in_month) = month_day_from_year_day(self.day);
         let (add_years, month) = (month as i32 + months).div_mod_floor(&12);
         let (add_years, month) = (add_years as i16, month as u8);
 
@@ -285,7 +287,7 @@ impl GregorianNormalizedDate {
                 28
             }
         } else {
-            GREGORIAN_MONTH_LENGTHS[month as usize]
+            (year_day_from_month(month + 1) - year_day_from_month(month)) as u8
         };
 
         let carry = if day_in_month >= total_days_in_month {
@@ -297,7 +299,7 @@ impl GregorianNormalizedDate {
         } else {
             0
         };
-        self.day = GREGORIAN_MONTH_STARTS[month as usize] + (day_in_month - carry) as u16;
+        self.day = year_day_from_month(month) + (day_in_month - carry) as u16;
         carry
     }
 
@@ -571,29 +573,34 @@ mod tests {
 
     #[test]
     fn test_month_from_day_offset() {
-        assert_eq!(month_day_from_year_day(0), (0, 0));
-        assert_eq!(month_day_from_year_day(30), (0, 30));
-        assert_eq!(month_day_from_year_day(31), (1, 0));
-        assert_eq!(month_day_from_year_day(60), (1, 29));
-        assert_eq!(month_day_from_year_day(61), (2, 0));
-        assert_eq!(month_day_from_year_day(91), (2, 30));
-        assert_eq!(month_day_from_year_day(92), (3, 0));
-        assert_eq!(month_day_from_year_day(121), (3, 29));
-        assert_eq!(month_day_from_year_day(122), (4, 0));
-        assert_eq!(month_day_from_year_day(152), (4, 30));
-        assert_eq!(month_day_from_year_day(153), (5, 0));
-        assert_eq!(month_day_from_year_day(183), (5, 30));
-        assert_eq!(month_day_from_year_day(184), (6, 0));
-        assert_eq!(month_day_from_year_day(213), (6, 29));
-        assert_eq!(month_day_from_year_day(214), (7, 0));
-        assert_eq!(month_day_from_year_day(244), (7, 30));
-        assert_eq!(month_day_from_year_day(245), (8, 0));
-        assert_eq!(month_day_from_year_day(274), (8, 29));
-        assert_eq!(month_day_from_year_day(275), (9, 0));
-        assert_eq!(month_day_from_year_day(305), (9, 30));
-        assert_eq!(month_day_from_year_day(306), (10, 0));
-        assert_eq!(month_day_from_year_day(336), (10, 30));
-        assert_eq!(month_day_from_year_day(337), (11, 0));
-        assert_eq!(month_day_from_year_day(365), (11, 28));
+        let check = |year_day, expected_month, expected_day| {
+            let (month, day) = month_day_from_year_day(year_day);
+            assert_eq!(month, expected_month);
+            assert_eq!(day, expected_day);
+        };
+        check(0, 0, 0);
+        check(30, 0, 30);
+        check(31, 1, 0);
+        check(60, 1, 29);
+        check(61, 2, 0);
+        check(91, 2, 30);
+        check(92, 3, 0);
+        check(121, 3, 29);
+        check(122, 4, 0);
+        check(152, 4, 30);
+        check(153, 5, 0);
+        check(183, 5, 30);
+        check(184, 6, 0);
+        check(213, 6, 29);
+        check(214, 7, 0);
+        check(244, 7, 30);
+        check(245, 8, 0);
+        check(274, 8, 29);
+        check(275, 9, 0);
+        check(305, 9, 30);
+        check(306, 10, 0);
+        check(336, 10, 30);
+        check(337, 11, 0);
+        check(365, 11, 28);
     }
 }
