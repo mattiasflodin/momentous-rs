@@ -1,11 +1,12 @@
+use crate::div_rem::ClampedDivRem;
 use crate::duration::DurationS64;
 use crate::gregorian_normalized_date::GregorianNormalizedDate;
 use crate::instant::InstantS64;
 use crate::iso8601::chronology::Chronology;
 use crate::iso8601::precision::Precision;
 use crate::iso8601::{
-    DateTimeBuilder, HOURS_PER_DAY, MINUTES_PER_HOUR, SECONDS_PER_DAY, SECONDS_PER_HOUR,
-    SECONDS_PER_MINUTE,
+    DateTimeBuilder, HOURS_PER_DAY, MINUTES_PER_DAY, MINUTES_PER_HOUR, SECONDS_PER_DAY,
+    SECONDS_PER_HOUR, SECONDS_PER_MINUTE,
 };
 use crate::zoneinfo::SegmentLookupResult;
 use num_integer::Integer;
@@ -275,7 +276,7 @@ impl DateTime {
     pub fn add_years(&self, years: i16) -> DateTimeWithCarry {
         let (precision, mut gnd, second, nanosecond) = Self::unpack0(self.w0);
         let day_carry = gnd.add_years(years);
-        let (second, seconds_carry) = self.spill_second_overflow(&gnd, second);
+        let (second, seconds_carry) = self.spill_eod_second_overflow(&gnd, second);
         let w0 = Self::pack0(precision, gnd, second, nanosecond);
         let result = DateTime {
             w0,
@@ -294,7 +295,7 @@ impl DateTime {
     pub fn add_months(&self, months: i32) -> DateTimeWithCarry {
         let (precision, mut gnd, second, nanosecond) = Self::unpack0(self.w0);
         let day_carry = gnd.add_months(months);
-        let (second, seconds_carry) = self.spill_second_overflow(&gnd, second);
+        let (second, seconds_carry) = self.spill_eod_second_overflow(&gnd, second);
         let result = DateTime {
             w0: Self::pack0(precision, gnd, second, nanosecond),
             w1: self.w1,
@@ -312,9 +313,59 @@ impl DateTime {
     pub fn add_days(&self, days: i32) -> DateTimeWithCarry {
         let (precision, mut gnd, second, nanosecond) = Self::unpack0(self.w0);
         gnd.add_days(days);
-        let (second, seconds_carry) = self.spill_second_overflow(&gnd, second);
+        let (second, seconds_carry) = self.spill_eod_second_overflow(&gnd, second);
         let result = DateTime {
             w0: Self::pack0(precision, gnd, second, nanosecond),
+            w1: self.w1,
+            chronology: self.chronology.clone(),
+        };
+        DateTimeWithCarry(
+            result,
+            Carry {
+                days: 0,
+                seconds: seconds_carry as u64,
+            },
+        )
+    }
+
+    pub fn add_minutes(&self, minutes: i64) -> DateTimeWithCarry {
+        let (precision, mut gnd, second_of_day, nanosecond) = Self::unpack0(self.w0);
+
+        // We can't easily determine the number of seconds to add since some minutes are
+        // irregularly longer or shorter than 60 seconds. But we know that every day has
+        // exactly 60*24 minutes. So we can start by splitting into days, minutes and seconds then
+        // "seeking" to the right day.
+        let (minute, second_of_minute) =
+            second_of_day.clamped_div_rem(MINUTES_PER_HOUR as u32, MINUTES_PER_DAY - 1);
+        let second_of_minute = second_of_minute as u8;
+        let (day_delta, minute) =
+            (minute as i64 + minutes).div_mod_floor(&(MINUTES_PER_DAY as i64));
+        let (day_delta, minute) = (day_delta as i32, minute as u16);
+        gnd.add_days(day_delta);
+
+        let (seconds_into_day, seconds_carry) = if minute < MINUTES_PER_DAY - 1 {
+            // Not the last minute of the day. We know that it's 60 seconds long.
+            if second_of_minute < SECONDS_PER_MINUTE {
+                (
+                    minute as u32 * SECONDS_PER_MINUTE as u32 + second_of_minute as u32,
+                    0,
+                )
+            } else {
+                let max_second = SECONDS_PER_MINUTE - 1;
+                let carry = second_of_minute - max_second;
+                (
+                    minute as u32 * SECONDS_PER_MINUTE as u32 + max_second as u32,
+                    carry as u32,
+                )
+            }
+        } else {
+            let seconds_into_day =
+                minute as u32 * SECONDS_PER_MINUTE as u32 + second_of_minute as u32;
+            self.spill_eod_second_overflow(&gnd, seconds_into_day)
+        };
+
+        let result = DateTime {
+            w0: Self::pack0(precision, gnd, seconds_into_day, nanosecond),
             w1: self.w1,
             chronology: self.chronology.clone(),
         };
@@ -338,10 +389,6 @@ impl DateTime {
             w1: self.w1,
             chronology: self.chronology.clone(),
         }
-    }
-
-    pub fn add_minutes(&self, minutes: i128) -> Self {
-        todo!()
     }
 
     #[allow(clippy::wrong_self_convention)]
@@ -444,7 +491,7 @@ impl DateTime {
         }
     }
 
-    fn spill_second_overflow(&self, gnd: &GregorianNormalizedDate, second: u32) -> (u32, u32) {
+    fn spill_eod_second_overflow(&self, gnd: &GregorianNormalizedDate, second: u32) -> (u32, u32) {
         // TODO can the seconds overflow become extremely large, like thousands of years? If so
         // we need a larger return type here, and probably some kind of fix to the logic.
         let leap_second_chronology = self.chronology.leap_seconds();
@@ -738,6 +785,150 @@ mod tests {
         assert_eq!(date_time.hour(), 0);
         assert_eq!(date_time.minute(), 0);
         assert_eq!(date_time.second(), 0);
+    }
+
+    #[test]
+    fn add_minutes() {
+        // Add 0 minutes.
+        let date_time = DateTime::builder()
+            .year(2000)
+            .month(3)
+            .day(1)
+            .hour(0)
+            .minute(0)
+            .second(0)
+            .build();
+        let date_time = date_time.add_minutes(0).unwrap();
+        assert_eq!(date_time.year(), 2000);
+        assert_eq!(date_time.month(), 3);
+        assert_eq!(date_time.day(), 1);
+        assert_eq!(date_time.hour(), 0);
+        assert_eq!(date_time.minute(), 0);
+        assert_eq!(date_time.second(), 0);
+
+        let date_time = DateTime::builder()
+            .year(2000)
+            .month(3)
+            .day(1)
+            .hour(0)
+            .minute(0)
+            .second(0)
+            .build();
+
+        // Add a minute to epoch time.
+        let date_time = date_time.add_minutes(1).unwrap();
+        assert_eq!(date_time.year(), 2000);
+        assert_eq!(date_time.month(), 3);
+        assert_eq!(date_time.day(), 1);
+        assert_eq!(date_time.hour(), 0);
+        assert_eq!(date_time.minute(), 1);
+        assert_eq!(date_time.second(), 0);
+
+        // Go back.
+        let date_time = date_time.add_minutes(-1).unwrap();
+        assert_eq!(date_time.year(), 2000);
+        assert_eq!(date_time.month(), 3);
+        assert_eq!(date_time.day(), 1);
+        assert_eq!(date_time.hour(), 0);
+        assert_eq!(date_time.minute(), 0);
+        assert_eq!(date_time.second(), 0);
+
+        // Subtract a minute from epoch time.
+        let date_time = date_time.add_minutes(-1).unwrap();
+        assert_eq!(date_time.year(), 2000);
+        assert_eq!(date_time.month(), 2);
+        assert_eq!(date_time.day(), 29);
+        assert_eq!(date_time.hour(), 23);
+        assert_eq!(date_time.minute(), 59);
+        assert_eq!(date_time.second(), 0);
+
+        // Add through a leap second.
+        let date_time = DateTime::builder()
+            .year(1998)
+            .month(12)
+            .day(31)
+            .hour(23)
+            .minute(59)
+            .second(59)
+            .build();
+        let date_time = date_time.add_minutes(1).unwrap();
+        assert_eq!(date_time.year(), 1999);
+        assert_eq!(date_time.month(), 1);
+        assert_eq!(date_time.day(), 1);
+        assert_eq!(date_time.hour(), 0);
+        assert_eq!(date_time.minute(), 0);
+        assert_eq!(date_time.second(), 59);
+
+        // Add from a leap second to generate carry.
+        let date_time = DateTime::builder()
+            .year(1998)
+            .month(12)
+            .day(31)
+            .hour(23)
+            .minute(59)
+            .second(60)
+            .build();
+        let date_time = date_time.add_minutes(1);
+        assert_eq!(date_time.days_carry(), 0);
+        assert_eq!(date_time.seconds_carry(), 1);
+        let date_time = date_time.apply_carry();
+        assert_eq!(date_time.year(), 1999);
+        assert_eq!(date_time.month(), 1);
+        assert_eq!(date_time.day(), 1);
+        assert_eq!(date_time.hour(), 0);
+        assert_eq!(date_time.minute(), 1);
+        assert_eq!(date_time.second(), 0);
+
+        // Add minutes across multiple days.
+        let date_time = DateTime::builder()
+            .year(1998)
+            .month(12)
+            .day(31)
+            .hour(23)
+            .minute(59)
+            .second(59)
+            .build();
+        let date_time = date_time.add_minutes(2 * 24 * 60).unwrap();
+        assert_eq!(date_time.year(), 1999);
+        assert_eq!(date_time.month(), 1);
+        assert_eq!(date_time.day(), 2);
+        assert_eq!(date_time.hour(), 23);
+        assert_eq!(date_time.minute(), 59);
+        assert_eq!(date_time.second(), 59);
+
+        // Subtract minutes across multiple days.
+        let date_time = DateTime::builder()
+            .year(1999)
+            .month(1)
+            .day(2)
+            .hour(23)
+            .minute(59)
+            .second(59)
+            .build();
+        let date_time = date_time.add_minutes(-2 * 24 * 60).unwrap();
+        assert_eq!(date_time.year(), 1998);
+        assert_eq!(date_time.month(), 12);
+        assert_eq!(date_time.day(), 31);
+        assert_eq!(date_time.hour(), 23);
+        assert_eq!(date_time.minute(), 59);
+        assert_eq!(date_time.second(), 59);
+
+        // Add minutes spanning 100 years.
+        let date_time = DateTime::builder()
+            .year(1998)
+            .month(12)
+            .day(31)
+            .hour(23)
+            .minute(59)
+            .second(59)
+            .build();
+        let date_time = date_time.add_minutes(36525 * 24 * 60).unwrap();
+        assert_eq!(date_time.year(), 2098);
+        assert_eq!(date_time.month(), 12);
+        assert_eq!(date_time.day(), 31);
+        assert_eq!(date_time.hour(), 23);
+        assert_eq!(date_time.minute(), 59);
+        assert_eq!(date_time.second(), 59);
     }
 
     #[test]

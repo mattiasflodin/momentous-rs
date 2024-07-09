@@ -306,7 +306,7 @@ impl GregorianNormalizedDate {
     pub(crate) fn add_days(&mut self, days: i32) {
         if days > 0 {
             self.add_days_forward(days as u32);
-        } else {
+        } else if days != 0 {
             self.add_days_backward((-days) as u32);
         }
     }
