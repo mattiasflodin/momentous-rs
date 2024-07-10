@@ -328,6 +328,10 @@ impl DateTime {
         )
     }
 
+    pub fn add_hours(&self, hours: i32) -> DateTimeWithCarry {
+        self.add_minutes(hours as i64 * MINUTES_PER_HOUR as i64)
+    }
+
     pub fn add_minutes(&self, minutes: i64) -> DateTimeWithCarry {
         let (precision, mut gnd, second_of_day, nanosecond) = Self::unpack0(self.w0);
 
@@ -785,6 +789,149 @@ mod tests {
         assert_eq!(date_time.hour(), 0);
         assert_eq!(date_time.minute(), 0);
         assert_eq!(date_time.second(), 0);
+    }
+
+    #[test]
+    fn add_hours() {
+        // Add 0 hours.
+        let date_time = DateTime::builder()
+            .year(2000)
+            .month(3)
+            .day(1)
+            .hour(0)
+            .minute(0)
+            .second(0)
+            .build();
+        let date_time = date_time.add_hours(0).unwrap();
+        assert_eq!(date_time.year(), 2000);
+        assert_eq!(date_time.month(), 3);
+        assert_eq!(date_time.day(), 1);
+        assert_eq!(date_time.hour(), 0);
+        assert_eq!(date_time.minute(), 0);
+        assert_eq!(date_time.second(), 0);
+
+        let date_time = DateTime::builder()
+            .year(2000)
+            .month(3)
+            .day(1)
+            .hour(0)
+            .minute(0)
+            .second(0)
+            .build();
+
+        // Add an hour to epoch time.
+        let date_time = date_time.add_hours(1).drop_carry();
+        assert_eq!(date_time.year(), 2000);
+        assert_eq!(date_time.month(), 3);
+        assert_eq!(date_time.day(), 1);
+        assert_eq!(date_time.hour(), 1);
+        assert_eq!(date_time.minute(), 0);
+        assert_eq!(date_time.second(), 0);
+
+        // Go back.
+        let date_time = date_time.add_hours(-1).drop_carry();
+        assert_eq!(date_time.year(), 2000);
+        assert_eq!(date_time.month(), 3);
+        assert_eq!(date_time.day(), 1);
+        assert_eq!(date_time.hour(), 0);
+        assert_eq!(date_time.minute(), 0);
+
+        // Subtract an hour from epoch time.
+        let date_time = date_time.add_hours(-1).drop_carry();
+        assert_eq!(date_time.year(), 2000);
+        assert_eq!(date_time.month(), 2);
+        assert_eq!(date_time.day(), 29);
+        assert_eq!(date_time.hour(), 23);
+        assert_eq!(date_time.minute(), 0);
+        assert_eq!(date_time.second(), 0);
+
+        // Add through a leap second.
+        let date_time = DateTime::builder()
+            .year(1998)
+            .month(12)
+            .day(31)
+            .hour(23)
+            .minute(59)
+            .second(59)
+            .build();
+        let date_time = date_time.add_hours(1).unwrap();
+        assert_eq!(date_time.year(), 1999);
+        assert_eq!(date_time.month(), 1);
+        assert_eq!(date_time.day(), 1);
+        assert_eq!(date_time.hour(), 0);
+        assert_eq!(date_time.minute(), 59);
+        assert_eq!(date_time.second(), 59);
+
+        // Add from a leap second to generate carry.
+        let date_time = DateTime::builder()
+            .year(1998)
+            .month(12)
+            .day(31)
+            .hour(23)
+            .minute(59)
+            .second(60)
+            .build();
+        let date_time = date_time.add_hours(1);
+        assert_eq!(date_time.days_carry(), 0);
+        assert_eq!(date_time.seconds_carry(), 1);
+        let date_time = date_time.apply_carry();
+        assert_eq!(date_time.year(), 1999);
+        assert_eq!(date_time.month(), 1);
+        assert_eq!(date_time.day(), 1);
+        assert_eq!(date_time.hour(), 1);
+        assert_eq!(date_time.minute(), 0);
+        assert_eq!(date_time.second(), 0);
+
+        // Add hours across multiple days.
+        let date_time = DateTime::builder()
+            .year(1998)
+            .month(12)
+            .day(31)
+            .hour(23)
+            .minute(59)
+            .second(59)
+            .build();
+        let date_time = date_time.add_hours(2 * 24).unwrap();
+        assert_eq!(date_time.year(), 1999);
+        assert_eq!(date_time.month(), 1);
+        assert_eq!(date_time.day(), 2);
+        assert_eq!(date_time.hour(), 23);
+        assert_eq!(date_time.minute(), 59);
+        assert_eq!(date_time.second(), 59);
+
+        // Subtract hours across multiple days.
+        let date_time = DateTime::builder()
+            .year(1999)
+            .month(1)
+            .day(2)
+            .hour(23)
+            .minute(59)
+            .second(59)
+            .build();
+        let date_time = date_time.add_hours(-2 * 24).unwrap();
+        assert_eq!(date_time.year(), 1998);
+        assert_eq!(date_time.month(), 12);
+        assert_eq!(date_time.day(), 31);
+        assert_eq!(date_time.hour(), 23);
+        assert_eq!(date_time.minute(), 59);
+        assert_eq!(date_time.second(), 59);
+
+        // Add hours spanning 100 years.
+        let date_time = DateTime::builder()
+            .year(1998)
+            .month(12)
+            .day(31)
+            .hour(23)
+            .minute(59)
+            .second(59)
+            .build();
+        let date_time = date_time.add_hours(36525 * 24).unwrap();
+        assert_eq!(date_time.year(), 2098);
+        assert_eq!(date_time.month(), 12);
+        assert_eq!(date_time.day(), 31);
+        assert_eq!(date_time.hour(), 23);
+        assert_eq!(date_time.minute(), 59);
+        assert_eq!(date_time.second(), 59);
     }
 
     #[test]
