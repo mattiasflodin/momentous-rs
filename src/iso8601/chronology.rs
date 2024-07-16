@@ -135,7 +135,7 @@ impl Chronology {
             d.div_rem_floor(day_length)
         };
 
-        let gnd = GregorianNormalizedDate::from_day(day.to_i128().unwrap());
+        let gnd = GregorianNormalizedDate::from_day(day.to_i32().unwrap());
         let (year, month, day) = gnd.to_date();
 
         let (hour, minute, second, millisecond, microsecond, nanosecond) =

@@ -1,7 +1,6 @@
 use crate::cursor::Cursor;
-use crate::div_rem::ClampedDivRem;
 use crate::gregorian_normalized_date::GregorianNormalizedDate;
-use crate::instant::InstantS128;
+use crate::instant::InstantS64;
 use crate::iso8601::chronology::Chronology;
 use crate::iso8601::precision::Precision;
 use crate::iso8601::{
@@ -15,8 +14,10 @@ use std::cmp::min;
 
 #[derive(Debug, Clone)]
 pub struct Carry {
-    days: u128,
-    seconds: u128,
+    // TODO what's the maximum theoretical carry that you can get? Probably a lot less than these
+    // types allow for.
+    days: u32,
+    seconds: u64,
 }
 
 impl Carry {
@@ -29,11 +30,11 @@ impl Carry {
 pub struct DateTimeWithCarry(DateTime, Carry);
 
 impl DateTimeWithCarry {
-    pub(super) fn with_days(date_time: DateTime, days: u128) -> Self {
+    pub(super) fn with_days(date_time: DateTime, days: u32) -> Self {
         DateTimeWithCarry(date_time, Carry { days, seconds: 0 })
     }
 
-    pub(super) fn with_seconds(date_time: DateTime, seconds: u128) -> Self {
+    pub(super) fn with_seconds(date_time: DateTime, seconds: u64) -> Self {
         DateTimeWithCarry(date_time, Carry { days: 0, seconds })
     }
 
@@ -41,11 +42,11 @@ impl DateTimeWithCarry {
         !self.1.is_zero()
     }
 
-    pub fn days_carry(&self) -> u128 {
+    pub fn days_carry(&self) -> u32 {
         self.1.days
     }
 
-    pub fn seconds_carry(&self) -> u128 {
+    pub fn seconds_carry(&self) -> u64 {
         self.1.seconds
     }
 
@@ -63,12 +64,13 @@ impl DateTimeWithCarry {
 
     pub fn apply_carry(&self) -> DateTime {
         let carry = self.1.clone();
-        let DateTimeWithCarry(result, carry2) = self.0.add_days(carry.days as i128);
+        let DateTimeWithCarry(result, carry2) = self.0.add_days(carry.days as i32);
         assert_eq!(carry2.days, 0);
-        result.add_seconds(carry.seconds as i128 + carry2.seconds as i128)
+        result.add_seconds((carry.seconds + carry2.seconds) as i64)
     }
 }
 
+/// An ISO 8601 date and time. The range is from 0000-01-01 to 9999-12-31.
 #[derive(Debug, Clone)]
 pub struct DateTime {
     chronology: Chronology,
@@ -102,7 +104,7 @@ impl DateTime {
         }
     }
 
-    pub fn year(&self) -> i128 {
+    pub fn year(&self) -> u16 {
         self.gnd.unnormalized_year()
     }
 
@@ -148,7 +150,7 @@ impl DateTime {
     // "falling behind" the actual time. It might matter when you're e.g.
     // adding a month to something that has fallen behind? I'm not sure.
 
-    pub fn add_years(&self, years: i128) -> DateTimeWithCarry {
+    pub fn add_years(&self, years: i16) -> DateTimeWithCarry {
         let mut result = (*self).clone();
         let day_carry = result.gnd.add_years(years);
         let days_since_epoch = result.gnd.to_day();
@@ -157,13 +159,13 @@ impl DateTime {
         DateTimeWithCarry(
             result,
             Carry {
-                days: day_carry as u128,
-                seconds: seconds_carry,
+                days: day_carry as u32,
+                seconds: seconds_carry as u64,
             },
         )
     }
 
-    pub fn add_months(&self, months: i128) -> DateTimeWithCarry {
+    pub fn add_months(&self, months: i32) -> DateTimeWithCarry {
         let mut result = (*self).clone();
         let day_carry = result.gnd.add_months(months);
         let days_from_epoch = result.gnd.to_day();
@@ -172,13 +174,13 @@ impl DateTime {
         DateTimeWithCarry(
             result,
             Carry {
-                days: day_carry as u128,
-                seconds: seconds_carry,
+                days: day_carry as u32,
+                seconds: seconds_carry as u64,
             },
         )
     }
 
-    pub fn add_days(&self, days: i128) -> DateTimeWithCarry {
+    pub fn add_days(&self, days: i32) -> DateTimeWithCarry {
         let mut result = (*self).clone();
         result.gnd.add_days(days);
         let days_from_epoch = result.gnd.to_day();
@@ -188,17 +190,17 @@ impl DateTime {
             result,
             Carry {
                 days: 0,
-                seconds: seconds_carry,
+                seconds: seconds_carry as u64,
             },
         )
     }
 
-    pub fn add_seconds(&self, seconds: i128) -> Self {
+    pub fn add_seconds(&self, seconds: i64) -> Self {
         let mut result = (*self).clone();
         if seconds > 0 {
-            result.add_seconds_mut(seconds as u128);
+            result.add_seconds_mut(seconds as u64);
         } else {
-            result.subtract_seconds_mut(-seconds as u128);
+            result.subtract_seconds_mut(-seconds as u64);
         }
         result
     }
@@ -207,14 +209,15 @@ impl DateTime {
         todo!()
     }
 
-    fn add_seconds_mut(&mut self, seconds: u128) {
+    fn add_seconds_mut(&mut self, seconds: u64) {
         let mut seconds_remaining = seconds;
         if self.segment_cursor.at_end() {
             // We are beyond the last leap-second segment so adding seconds is trivial.
             let (days, second) =
-                (self.second as u128 + seconds_remaining).div_mod_floor(&(SECONDS_PER_DAY as u128));
-            self.gnd.add_days(days as i128);
-            self.second = second as u32;
+                (self.second as u64 + seconds_remaining).div_mod_floor(&(SECONDS_PER_DAY as u64));
+            let (days, second) = (days as i32, second as u32);
+            self.gnd.add_days(days);
+            self.second = second;
             return;
         }
 
@@ -226,16 +229,17 @@ impl DateTime {
             // We are before the first leap-second segment, so we can trivially
             // add seconds until we reach the first segment.
             let first_segment = segment_cursor.next().unwrap();
-            let days_to_first_segment = (first_segment.start_day as i128 - (day + 1)) as u128;
-            let seconds_to_first_segment = days_to_first_segment * SECONDS_PER_DAY as u128
-                + ((SECONDS_PER_DAY - self.second) as u128);
+            let days_to_first_segment = (first_segment.start_day as i32 - (day + 1)) as u32;
+            let seconds_to_first_segment = days_to_first_segment as u64 * SECONDS_PER_DAY as u64
+                + ((SECONDS_PER_DAY - self.second) as u64);
             let seconds_to_add = seconds_remaining.min(seconds_to_first_segment);
             let (days_to_add, second) =
-                (self.second as u128 + seconds_to_add).div_mod_floor(&(SECONDS_PER_DAY as u128));
-            self.gnd.add_days(days_to_add as i128);
-            self.second = second as u32;
+                (self.second as u64 + seconds_to_add).div_mod_floor(&(SECONDS_PER_DAY as u64));
+            let (days_to_add, second) = (days_to_add as u32, second as u32);
+            self.gnd.add_days(days_to_add as i32);
+            self.second = second;
             seconds_remaining -= seconds_to_add;
-            day += days_to_add as i128;
+            day += days_to_add as i32;
             first_segment
         };
         if seconds_remaining == 0 {
@@ -247,70 +251,76 @@ impl DateTime {
 
         let leap_second_chronology = get_leap_seconds();
 
-        let days_into_segment = day - current_segment.start_day as i128;
-        let ticks = current_segment.start_instant.ticks_since_epoch() as i128
-            + days_into_segment * SECONDS_PER_DAY as i128
-            + self.second as i128;
-        let new_ticks = ticks + seconds_remaining as i128;
+        let days_into_segment = (day - current_segment.start_day as i32) as u32;
+        let ticks = current_segment.start_instant.ticks_since_epoch() as i64
+            + days_into_segment as i64 * SECONDS_PER_DAY as i64
+            + self.second as i64;
+        let new_ticks = ticks + seconds_remaining as i64;
         let new_segment_cursor = leap_second_chronology.by_instant_with_hint(
-            InstantS128::from_ticks_since_epoch(new_ticks),
+            InstantS64::from_ticks_since_epoch(new_ticks),
             &self.segment_cursor,
         );
 
         if let Some(new_segment) = new_segment_cursor.current() {
             let seconds_into_segment =
-                new_ticks - new_segment.start_instant.ticks_since_epoch() as i128;
+                new_ticks - new_segment.start_instant.ticks_since_epoch() as i64;
 
+            let (new_days_into_segment, new_second) =
+                seconds_into_segment.div_rem(&(SECONDS_PER_DAY as i64));
             let (mut new_days_into_segment, mut new_second) =
-                seconds_into_segment.div_rem(&(SECONDS_PER_DAY as i128));
+                (new_days_into_segment as u32, new_second as u32);
 
             let max_day = new_segment.duration_days - 1;
-            if new_days_into_segment > max_day as i128 {
+            if new_days_into_segment > max_day {
                 // Leap seconds at the end of the day caused us to overshoot the last day of the
                 // segment. We need to spill the extra day into the second component.
-                let overshoot_days = new_days_into_segment - max_day as i128;
+                let overshoot_days = new_days_into_segment - max_day;
                 assert_eq!(
                     overshoot_days, 1,
                     "More than 86400 leap seconds in one day?"
                 );
-                new_days_into_segment = max_day as i128;
-                new_second += SECONDS_PER_DAY as i128;
+                new_days_into_segment = max_day;
+                new_second += SECONDS_PER_DAY;
             }
 
             if new_days_into_segment != days_into_segment
                 || new_segment_cursor != self.segment_cursor
             {
                 self.gnd = GregorianNormalizedDate::from_day(
-                    new_segment.start_day as i128 + new_days_into_segment,
+                    (new_segment.start_day + new_days_into_segment) as i32,
                 );
             }
-            self.second = new_second as u32;
+            self.second = new_second;
             self.segment_cursor = new_segment_cursor;
         } else {
             // We have gone beyond the last leap-second segment. We only end up here if
             // we were previously in a valid segment, since we would have returned early
             // otherwise.
             let last_segment = new_segment_cursor.peek_prev().unwrap();
-            let last_segment_end_tick = last_segment.start_instant.ticks_since_epoch() as i128
-                + last_segment.duration_days as i128 * SECONDS_PER_DAY as i128
-                + last_segment.leap_seconds as i128;
-            let seconds_since_last_segment = new_ticks - last_segment_end_tick;
-            let (days, second) = seconds_since_last_segment.div_rem(&(SECONDS_PER_DAY as i128));
+            let last_segment_end_tick = last_segment.start_instant.ticks_since_epoch() as u64
+                + last_segment.duration_days as u64 * SECONDS_PER_DAY as u64
+                + last_segment.leap_seconds as u64;
+            let seconds_since_last_segment = new_ticks as u64 - last_segment_end_tick;
+            let (days, second) = seconds_since_last_segment.div_rem(&(SECONDS_PER_DAY as u64));
+            let (days, second) = (days as u32, second as u32);
 
             self.gnd = GregorianNormalizedDate::from_day(
-                last_segment.start_day as i128 + last_segment.duration_days as i128 + days,
+                (last_segment.start_day + last_segment.duration_days + days) as i32,
             );
-            self.second = second as u32;
+            self.second = second;
             self.segment_cursor = new_segment_cursor;
         }
     }
 
-    fn subtract_seconds_mut(&mut self, seconds: u128) {
+    fn subtract_seconds_mut(&mut self, seconds: u64) {
         let mut seconds_remaining = seconds;
         if self.segment_cursor.at_start() {
             // We are before the first leap-second segment so subtracting seconds is trivial.
-            let (days, second) = self.second.clamped_div_rem(SECONDS_PER_DAY, 0_u32);
-            self.gnd.add_days(-(days as i128));
+            // TODO this case is clearly not tested because the code was completely broken.
+            let (days, second) =
+                (self.second as i64 - seconds as i64).div_mod_floor(&(SECONDS_PER_DAY as i64));
+            let (days, second) = (days as i32, second as u32);
+            self.gnd.add_days(days);
             self.second = second;
             return;
         }
@@ -323,16 +333,16 @@ impl DateTime {
             // We are beyond the last leap-second segment, so we can trivially
             // subtract seconds until we reach the last segment.
             let last_segment = segment_cursor.prev().unwrap();
-            let last_segment_end_day =
-                (last_segment.start_day + last_segment.duration_days) as i128;
-            let days_to_last_segment = (day - last_segment_end_day) as u128;
+            let last_segment_end_day = last_segment.start_day + last_segment.duration_days;
+            let days_to_last_segment = day as u32 - last_segment_end_day;
             let seconds_to_last_segment =
-                days_to_last_segment * SECONDS_PER_DAY as u128 + self.second as u128;
-            let seconds_to_subtract = seconds_remaining.min(seconds_to_last_segment);
-            let (days_to_subtract, second) = (self.second as i128 - seconds_to_subtract as i128)
-                .div_mod_floor(&(SECONDS_PER_DAY as i128));
+                days_to_last_segment as u64 * SECONDS_PER_DAY as u64 + self.second as u64;
+            let seconds_to_subtract = min(seconds_remaining, seconds_to_last_segment);
+            let (days_to_subtract, second) = (self.second as i64 - seconds_to_subtract as i64)
+                .div_mod_floor(&(SECONDS_PER_DAY as i64));
+            let (days_to_subtract, second) = (days_to_subtract as i32, second as u32);
             self.gnd.add_days(days_to_subtract);
-            self.second = second as u32;
+            self.second = second;
             seconds_remaining -= seconds_to_subtract;
             day -= days_to_subtract;
             last_segment
@@ -346,85 +356,87 @@ impl DateTime {
 
         let leap_second_chronology = get_leap_seconds();
 
-        let days_into_segment = day - current_segment.start_day as i128;
-        let ticks = current_segment.start_instant.ticks_since_epoch() as i128
-            + days_into_segment * SECONDS_PER_DAY as i128
-            + self.second as i128;
-        let new_ticks = ticks - seconds_remaining as i128;
+        let days_into_segment = day as u32 - current_segment.start_day;
+        let ticks = current_segment.start_instant.ticks_since_epoch() as u64
+            + days_into_segment as u64 * SECONDS_PER_DAY as u64
+            + self.second as u64;
+        let new_ticks = ticks as i64 - seconds_remaining as i64;
         let new_segment_cursor = leap_second_chronology.by_instant_with_hint(
-            InstantS128::from_ticks_since_epoch(new_ticks),
+            InstantS64::from_ticks_since_epoch(new_ticks),
             &self.segment_cursor,
         );
 
         if let Some(new_segment) = new_segment_cursor.current() {
             let seconds_into_segment =
-                new_ticks - new_segment.start_instant.ticks_since_epoch() as i128;
+                new_ticks - new_segment.start_instant.ticks_since_epoch() as i64;
 
+            let (new_days_into_segment, new_second) =
+                seconds_into_segment.div_rem(&(SECONDS_PER_DAY as i64));
             let (mut new_days_into_segment, mut new_second) =
-                seconds_into_segment.div_rem(&(SECONDS_PER_DAY as i128));
+                (new_days_into_segment as u32, new_second as u32);
 
             let max_day = new_segment.duration_days - 1;
-            if new_days_into_segment > max_day as i128 {
+            if new_days_into_segment > max_day {
                 // Leap seconds at the end of the day caused us to overshoot the last day of the
                 // segment. We need to spill the extra day into the second component.
-                let overshoot_days = new_days_into_segment - max_day as i128;
+                let overshoot_days = new_days_into_segment - max_day;
                 assert_eq!(
                     overshoot_days, 1,
                     "More than 86400 leap seconds in one day?"
                 );
-                new_days_into_segment = max_day as i128;
-                new_second += SECONDS_PER_DAY as i128;
+                new_days_into_segment = max_day;
+                new_second += SECONDS_PER_DAY;
             }
 
             if new_days_into_segment != days_into_segment
                 || new_segment_cursor != self.segment_cursor
             {
                 self.gnd = GregorianNormalizedDate::from_day(
-                    new_segment.start_day as i128 + new_days_into_segment,
+                    (new_segment.start_day + new_days_into_segment) as i32,
                 );
             }
-            self.second = new_second as u32;
+            self.second = new_second;
             self.segment_cursor = new_segment_cursor;
         } else {
             // We have gone beyond the first leap-second segment. We only end up here if
             // we were previously in a valid segment, since we would have returned early
             // otherwise.
             let first_segment = new_segment_cursor.peek_next().unwrap();
-            let first_segment_start_tick = first_segment.start_instant.ticks_since_epoch() as i128;
-            let seconds_until_first_segment = first_segment_start_tick - new_ticks;
-            let (mut days, mut second) =
-                seconds_until_first_segment.div_rem(&(SECONDS_PER_DAY as i128));
+            let first_segment_start_tick = first_segment.start_instant.ticks_since_epoch();
+            let seconds_until_first_segment = first_segment_start_tick as i64 - new_ticks;
+            let (days, second) = seconds_until_first_segment.div_rem(&(SECONDS_PER_DAY as i64));
+            let (mut days, mut second) = (days as i32, second as u32);
 
             if second != 0 {
                 // We have the distance to the upcoming segment in days and
                 // seconds, but this needs to be converted into a "rounded down"
                 // (toward negative) day and the seconds into the day.
                 days += 1;
-                second = SECONDS_PER_DAY as i128 - second;
+                second = SECONDS_PER_DAY - second;
             }
 
-            self.gnd = GregorianNormalizedDate::from_day(first_segment.start_day as i128 - days);
-            self.second = second as u32;
+            self.gnd = GregorianNormalizedDate::from_day(first_segment.start_day as i32 - days);
+            self.second = second;
             self.segment_cursor = new_segment_cursor;
         }
     }
 
-    fn adjust_segment(&mut self, day: i128) {
+    fn adjust_segment(&mut self, day: i32) {
         if let Some(segment) = self.segment_cursor.current() {
-            if day >= segment.start_day as i128
-                && day < (segment.start_day + segment.duration_days) as i128
+            if day >= segment.start_day as i32
+                && day < (segment.start_day + segment.duration_days) as i32
             {
                 return;
             }
         } else if self.segment_cursor.at_start() {
             let next_segment = self.segment_cursor.peek_next().unwrap();
-            if day < next_segment.start_day as i128 {
+            if day < next_segment.start_day as i32 {
                 return;
             }
         } else {
             assert!(self.segment_cursor.at_end());
             let prev_segment = self.segment_cursor.peek_prev().unwrap();
-            if day >= (prev_segment.start_day + prev_segment.duration_days) as i128 {
+            if day >= (prev_segment.start_day + prev_segment.duration_days) as i32 {
                 return;
             }
         }
@@ -433,19 +445,21 @@ impl DateTime {
         self.segment_cursor = get_leap_seconds().by_day(day);
     }
 
-    fn spill_seconds_overflow(&mut self, days_from_epoch: i128) -> u128 {
+    fn spill_seconds_overflow(&mut self, days_from_epoch: i32) -> u32 {
+        // TODO can the seconds overflow become extremely large, like thousands of years? If so
+        // we need a larger return type here, and probably some kind of fix to the logic.
         if let Some(segment) = self.segment_cursor.current() {
-            let day_offset = (days_from_epoch - segment.start_day as i128) as u32;
+            let day_offset = (days_from_epoch - segment.start_day as i32) as u32;
             let leap_seconds = if day_offset == segment.duration_days {
                 segment.leap_seconds
             } else {
                 0
             };
-            let day_length_s = (86_400i32 + leap_seconds as i32) as u32;
+            let day_length_s = (SECONDS_PER_DAY as i32 + leap_seconds as i32) as u32;
             if self.second >= day_length_s {
                 let second_carry = self.second - day_length_s;
                 self.second = day_length_s;
-                second_carry as u128
+                second_carry
             } else {
                 0
             }
@@ -851,7 +865,7 @@ mod tests {
         assert_eq!(date_time.second(), 1);
 
         // Go to the first leap segment.
-        let date_time = date_time.add_seconds(SECONDS_PER_DAY as i128 * 365);
+        let date_time = date_time.add_seconds(SECONDS_PER_DAY as i64 * 365);
         assert_eq!(date_time.year(), 1970);
         assert_eq!(date_time.month(), 1);
         assert_eq!(date_time.day(), 1);
@@ -895,7 +909,7 @@ mod tests {
         assert_eq!(date_time.second(), 0);
 
         // From a point past the last leap segment and further.
-        let date_time = date_time.add_seconds(SECONDS_PER_DAY as i128 * 365);
+        let date_time = date_time.add_seconds(SECONDS_PER_DAY as i64 * 365);
         assert_eq!(date_time.year(), 2018);
         assert_eq!(date_time.month(), 1);
         assert_eq!(date_time.day(), 1);
