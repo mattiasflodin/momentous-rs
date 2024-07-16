@@ -148,6 +148,21 @@ impl DateTime {
     // "falling behind" the actual time. It might matter when you're e.g.
     // adding a month to something that has fallen behind? I'm not sure.
 
+    pub fn add_months(&self, months: i128) -> DateTimeWithCarry {
+        let mut result = (*self).clone();
+        let day_carry = result.gnd.add_months(months);
+        let days_from_epoch = result.gnd.to_day();
+        result.adjust_segment(days_from_epoch);
+        let seconds_carry = result.spill_seconds_overflow(days_from_epoch);
+        DateTimeWithCarry(
+            result,
+            Carry {
+                days: day_carry as u128,
+                seconds: seconds_carry,
+            },
+        )
+    }
+
     pub fn add_days(&self, days: i128) -> DateTimeWithCarry {
         let mut result = (*self).clone();
         result.gnd.add_days(days);
@@ -499,6 +514,76 @@ mod tests {
             .second(60)
             .build();
         assert_eq!(date_time.second(), 60);
+    }
+
+    #[test]
+    fn add_months() {
+        let date_time = DateTime::builder()
+            .year(2000)
+            .month(3)
+            .day(1)
+            .hour(0)
+            .minute(0)
+            .second(0)
+            .build();
+
+        // Add a month to epoch time.
+        let date_time = date_time.add_months(1).unwrap();
+        assert_eq!(date_time.year(), 2000);
+        assert_eq!(date_time.month(), 4);
+        assert_eq!(date_time.day(), 1);
+        assert_eq!(date_time.hour(), 0);
+        assert_eq!(date_time.minute(), 0);
+        assert_eq!(date_time.second(), 0);
+
+        // Go back.
+        let date_time = date_time.add_months(-1).unwrap();
+        assert_eq!(date_time.year(), 2000);
+        assert_eq!(date_time.month(), 3);
+        assert_eq!(date_time.day(), 1);
+        assert_eq!(date_time.hour(), 0);
+        assert_eq!(date_time.minute(), 0);
+        assert_eq!(date_time.second(), 0);
+
+        // Add from a month with 31 days to a month with 30 days.
+        let date_time = DateTime::builder()
+            .year(2000)
+            .month(3)
+            .day(31)
+            .hour(0)
+            .minute(0)
+            .second(0)
+            .build();
+        let date_time = date_time.add_months(1);
+        assert_eq!(date_time.days_carry(), 1);
+        assert_eq!(date_time.seconds_carry(), 0);
+        let date_time = date_time.apply_carry();
+        assert_eq!(date_time.year(), 2000);
+        assert_eq!(date_time.month(), 5);
+        assert_eq!(date_time.day(), 1);
+        assert_eq!(date_time.hour(), 0);
+        assert_eq!(date_time.minute(), 0);
+        assert_eq!(date_time.second(), 0);
+
+        // Add from a leap day to a non-leap day
+        let date_time = DateTime::builder()
+            .year(2000)
+            .month(2)
+            .day(29)
+            .hour(0)
+            .minute(0)
+            .second(0)
+            .build();
+        let date_time = date_time.add_months(12);
+        assert_eq!(date_time.days_carry(), 1);
+        assert_eq!(date_time.seconds_carry(), 0);
+        let date_time = date_time.apply_carry();
+        assert_eq!(date_time.year(), 2001);
+        assert_eq!(date_time.month(), 3);
+        assert_eq!(date_time.day(), 1);
+        assert_eq!(date_time.hour(), 0);
+        assert_eq!(date_time.minute(), 0);
+        assert_eq!(date_time.second(), 0);
     }
 
     #[test]
