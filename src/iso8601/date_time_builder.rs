@@ -10,7 +10,7 @@ use crate::zoneinfo::get_leap_seconds;
 pub struct DateTimeBuilder {
     chronology: Option<Chronology>,
     precision: Option<Precision>,
-    year: Option<i128>,
+    year: Option<u16>,
     month: Option<u8>,
     day: Option<u8>,
     hour: Option<u8>,
@@ -33,7 +33,7 @@ impl DateTimeBuilder {
         self
     }
 
-    pub fn year(&mut self, year: i128) -> &mut Self {
+    pub fn year(&mut self, year: u16) -> &mut Self {
         self.year = Some(year);
         self.precision = opt_max(self.precision, Precision::Years);
         self

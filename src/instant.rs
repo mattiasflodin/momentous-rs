@@ -332,7 +332,7 @@ impl<T: Tick, S: Scale> TryFrom<SystemTime> for Instant<T, S> {
 
         let (mut seconds, subsecond_ns) = system_time_to_time_t(value);
         if !system_time_includes_leap_seconds() {
-            seconds += get_leap_second_adjustment(seconds) as i128;
+            seconds += get_leap_second_adjustment(seconds) as i64;
         }
 
         // FIXME report proper error here
@@ -352,7 +352,7 @@ impl<T: Tick, S: Scale> TryFrom<SystemTime> for Instant<T, S> {
 
 /// Return the number of seconds and nanoseconds since the Unix epoch, as
 /// defined by time_t (i.e. without caring about leap seconds).
-fn system_time_to_time_t(value: SystemTime) -> (i128, u32) {
+fn system_time_to_time_t(value: SystemTime) -> (libc::time_t, u32) {
     let sign = value < SystemTime::UNIX_EPOCH;
     let duration = if sign {
         SystemTime::UNIX_EPOCH.duration_since(value)
@@ -360,7 +360,7 @@ fn system_time_to_time_t(value: SystemTime) -> (i128, u32) {
         value.duration_since(SystemTime::UNIX_EPOCH)
     }
     .unwrap();
-    let mut seconds = duration.as_secs() as i128;
+    let mut seconds = duration.as_secs() as i64;
     if sign {
         seconds = -seconds;
     }
@@ -384,10 +384,6 @@ fn system_time_includes_leap_seconds() -> bool {
 
     let now = SystemTime::now();
     let (seconds, _) = system_time_to_time_t(now);
-    if (seconds > libc::time_t::MAX as i128) || (seconds < libc::time_t::MIN as i128) {
-        panic!("system time is outside of time_t range");
-    }
-    let seconds = seconds as libc::time_t;
     let mut georgian = libc::tm {
         tm_sec: 0,
         tm_min: 0,

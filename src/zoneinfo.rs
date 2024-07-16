@@ -195,12 +195,12 @@ impl LeapSecondChronology {
         self.by_instant(instant)
     }
 
-    pub fn by_day(&self, day: i128) -> SharedVecCursor<ContinuousTimeSegment> {
+    pub fn by_day(&self, day: i32) -> SharedVecCursor<ContinuousTimeSegment> {
         let segments = self.0.as_slice();
         let search_result = segments.binary_search_by(|s| {
-            if day < s.start_day as i128 {
+            if day < s.start_day as i32 {
                 Greater
-            } else if day < (s.start_day + s.duration_days) as i128 {
+            } else if day < (s.start_day + s.duration_days) as i32 {
                 Equal
             } else {
                 Less
@@ -262,11 +262,11 @@ fn load_leap_segments() -> Vec<ContinuousTimeSegment> {
     segments
 }
 
-pub(crate) fn get_leap_second_adjustment(unix_timestamp: i128) -> i32 {
+pub(crate) fn get_leap_second_adjustment(unix_timestamp: i64) -> i32 {
     // TODO can cast unix_timestamp to i32 here. If it's outside the range of the leap second array then
     // there are obviously no more leap seconds.
     let leap_seconds = get_leap_seconds();
-    let day = unix_timestamp / 86400;
+    let day = (unix_timestamp / 86400) as i32;
     let cursor = leap_seconds.by_day(day);
     if cursor.at_start() {
         0
