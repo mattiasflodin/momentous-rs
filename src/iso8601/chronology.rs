@@ -25,6 +25,14 @@ impl Chronology {
     }
 }
 
+impl PartialEq<Self> for Chronology {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.pimpl, &other.pimpl)
+    }
+}
+
+impl Eq for Chronology {}
+
 pub(super) struct SharedChronology {
     pub(crate) tz_data: TZData,
     leap_second_smearing: bool,
