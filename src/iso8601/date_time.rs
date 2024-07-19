@@ -1634,8 +1634,9 @@ mod tests {
             .minute(0)
             .second(0)
             .build();
-        assert!(date_time.checked_add_minutes(
-            (GregorianNormalizedDate::MAX_FIXED_DAY as i64 + 1)*24*60-1).is_none());
+        assert!(date_time
+            .checked_add_minutes((GregorianNormalizedDate::MAX_FIXED_DAY as i64 + 1) * 24 * 60 - 1)
+            .is_none());
 
         // Go out of bounds on the high end of the backing GregorianNormalizedDate.
         let date_time = DateTime::builder()
@@ -1646,8 +1647,9 @@ mod tests {
             .minute(0)
             .second(0)
             .build();
-        assert!(date_time.checked_add_minutes(
-            (GregorianNormalizedDate::MAX_FIXED_DAY as i64 + 1)*24*60).is_none());
+        assert!(date_time
+            .checked_add_minutes((GregorianNormalizedDate::MAX_FIXED_DAY as i64 + 1) * 24 * 60)
+            .is_none());
     }
 
     #[test]

@@ -26,12 +26,27 @@
 use std::cmp::Ordering;
 use crate::div_rem::ClampedDivRem;
 use num_integer::Integer;
+use std::fmt::Debug;
 
 pub(crate) struct OutOfBounds;
 
-impl std::fmt::Debug for OutOfBounds {
+impl Debug for OutOfBounds {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("out of bounds")
+    }
+}
+
+pub(crate) enum Error {
+    InvalidDate,
+    DateOutOfBounds,
+}
+
+impl Debug for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Error::InvalidDate => write!(f, "invalid date"),
+            Error::DateOutOfBounds => write!(f, "date out of bounds"),
+        }
     }
 }
 
@@ -86,6 +101,18 @@ fn month_day_from_year_day(year_day: u16) -> (u8, u8) {
     (month, day)
 }
 
+fn is_leap_year(century: u8, quadrennium: u8, year: u8) -> bool {
+    // Determine whether a year (in our normalized calendar) has 365 or 366
+    // days. The normalized calendar is constructed so that the leap day comes
+    // at the end of the year and always on year 3. The exception is a date like
+    // 1900-02-29, which is invalid because it's the first year of a century but
+    // not evenly divisible by 400. In the normalized calendar this is
+    // represented as (cycle: -1, century: 2, quadrennium: 24, year: 3, day: 365).
+    // Here the quadrennium is maxed out, but the century is not. This is
+    // the only case where the year is 3 but the year is not a leap year.
+    year == 3 && !(quadrennium == 24 && century != 3)
+}
+
 impl GregorianNormalizedDate {
     // Because a normalized date starts in March, we can't actually represent the entire
     // minimum year, so we have to add one to prevent January and February from becoming
@@ -119,7 +146,7 @@ impl GregorianNormalizedDate {
         if !(Self::MIN_FIXED_DAY..=Self::MAX_FIXED_DAY).contains(&day) {
             return None;
         }
-        
+
         let day = day - GREGORIAN_NORMALIZED_DATE_OFFSET_DAYS as i32;
         let (cycle, days_into_cycle) = day.div_mod_floor(&(GREGORIAN_CYCLE_DAYS as i32));
         let cycle = cycle as i8;
@@ -165,10 +192,13 @@ impl GregorianNormalizedDate {
             + GREGORIAN_NORMALIZED_DATE_OFFSET_DAYS as i32
     }
 
-    pub(crate) fn from_date(year: i32, month: u8, day: u8) -> Self {
-        assert!((Self::MIN_YEAR..=Self::MAX_YEAR).contains(&year));
-        assert!((1..=12).contains(&month));
-        assert!((1..=31).contains(&day));
+    pub(crate) fn from_date(year: i32, month: u8, day: u8) -> Result<Self, Error> {
+        if !(Self::MIN_YEAR..=Self::MAX_YEAR).contains(&year) {
+            return Err(Error::DateOutOfBounds);
+        }
+        if !(1..=12).contains(&month) {
+            return Err(Error::InvalidDate);
+        }
 
         let mut year = year;
         let mut month = month - 1;
@@ -189,14 +219,28 @@ impl GregorianNormalizedDate {
         let years_into_quadrennium = years_into_quadrennium as u8; // 2^2 years per quadrennium
 
         let month_day_offset = year_day_from_month(month);
+
+        let total_days_in_month = if month == 11 {
+            if is_leap_year(century, quadrennium, years_into_quadrennium) {
+                29
+            } else {
+                28
+            }
+        } else {
+            (year_day_from_month(month + 1) - month_day_offset) as u8
+        };
+        if day >= total_days_in_month {
+            return Err(Error::InvalidDate);
+        }
+
         let days_into_year = month_day_offset + day as u16;
-        GregorianNormalizedDate {
+        Ok(GregorianNormalizedDate {
             cycle,
             century,
             quadrennium,
             year: years_into_quadrennium,
             day: days_into_year,
-        }
+        })
     }
 
     pub(crate) fn to_date(&self) -> (u16, u8, u8) {
@@ -218,17 +262,6 @@ impl GregorianNormalizedDate {
             year += 1;
         }
         (year, month + 1, days_into_month + 1)
-    }
-
-    pub(crate) fn days_in_month(&self) -> u8 {
-        let month = month_from_year_day(self.day);
-        if month < 11 {
-            (year_day_from_month(month + 1) - year_day_from_month(month)) as u8
-        } else if self.is_leap_year() {
-            29
-        } else {
-            28
-        }
     }
 
     pub(crate) fn unnormalized_year(&self) -> i32 {
@@ -283,7 +316,7 @@ impl GregorianNormalizedDate {
     pub(crate) fn add_years(&mut self, years: i16) -> bool {
         self.add_years_no_carry(years);
 
-        if self.day == 365 && !self.is_leap_year() {
+        if self.day == 365 && !is_leap_year(self.century, self.quadrennium, self.year) {
             self.day = 364;
             true
         } else {
@@ -324,7 +357,7 @@ impl GregorianNormalizedDate {
         self.add_years_no_carry(add_years);
 
         let total_days_in_month = if month == 11 {
-            if self.is_leap_year() {
+            if is_leap_year(self.century, self.quadrennium, self.year) {
                 29
             } else {
                 28
@@ -370,24 +403,11 @@ impl GregorianNormalizedDate {
     }
 
     fn year_length(&self) -> u16 {
-        if self.is_leap_year() {
+        if is_leap_year(self.century, self.quadrennium, self.year) {
             366
         } else {
             365
         }
-    }
-
-    fn is_leap_year(&self) -> bool {
-        // Determine whether the current year (in the normalized calendar) has
-        // 365 or 366 days. The normalized calendar is constructed so that the
-        // leap day comes at the end of the year and always on year 3. The
-        // exception is a date like 1900-02-29, which is invalid because it's
-        // the first year of a century but not evenly divisible by 400. In the
-        // normalized calendar this is represented as (cycle: -1, century: 2,
-        // quadrennium: 24, year: 3, day: 365). Here the quadrennium is maxed
-        // out, but the century is not. This is the only case where the year is
-        // 3 but the year is not a leap year.
-        self.year == 3 && !(self.quadrennium == 24 && self.century != 3)
     }
 }
 
@@ -433,7 +453,7 @@ mod tests {
         assert_eq!(date.2, 1);
 
         // The zero-point of normalized dates.
-        let date = GregorianNormalizedDate::from_date(2000, 3, 1);
+        let date = GregorianNormalizedDate::from_date(2000, 3, 1).unwrap();
         assert_eq!(date.cycle, 0);
         assert_eq!(date.century, 0);
         assert_eq!(date.quadrennium, 0);
@@ -449,7 +469,7 @@ mod tests {
         assert_eq!(date.2, 1);
 
         // The end of a cycle.
-        let date = GregorianNormalizedDate::from_date(2000, 2, 29);
+        let date = GregorianNormalizedDate::from_date(2000, 2, 29).unwrap();
         assert_eq!(date.cycle, -1);
         assert_eq!(date.century, 3);
         assert_eq!(date.quadrennium, 24);
@@ -457,7 +477,7 @@ mod tests {
         assert_eq!(date.day, 365);
 
         // The end of the year before that. Just to probe around the leap day.
-        let date = GregorianNormalizedDate::from_date(1999, 2, 28);
+        let date = GregorianNormalizedDate::from_date(1999, 2, 28).unwrap();
         assert_eq!(date.cycle, -1);
         assert_eq!(date.century, 3);
         assert_eq!(date.quadrennium, 24);
@@ -467,81 +487,81 @@ mod tests {
 
     #[test]
     fn test_get_unnormalized_year() {
-        let date = GregorianNormalizedDate::from_date(2000, 3, 1);
+        let date = GregorianNormalizedDate::from_date(2000, 3, 1).unwrap();
         assert_eq!(date.unnormalized_year(), 2000);
 
-        let date = GregorianNormalizedDate::from_date(2000, 2, 29);
+        let date = GregorianNormalizedDate::from_date(2000, 2, 29).unwrap();
         assert_eq!(date.unnormalized_year(), 2000);
 
-        let date = GregorianNormalizedDate::from_date(2000, 3, 2);
+        let date = GregorianNormalizedDate::from_date(2000, 3, 2).unwrap();
         assert_eq!(date.unnormalized_year(), 2000);
 
-        let date = GregorianNormalizedDate::from_date(2000, 1, 1);
+        let date = GregorianNormalizedDate::from_date(2000, 1, 1).unwrap();
         assert_eq!(date.unnormalized_year(), 2000);
 
-        let date = GregorianNormalizedDate::from_date(1999, 12, 31);
+        let date = GregorianNormalizedDate::from_date(1999, 12, 31).unwrap();
         assert_eq!(date.unnormalized_year(), 1999);
 
-        let date = GregorianNormalizedDate::from_date(0, 1, 1);
+        let date = GregorianNormalizedDate::from_date(0, 1, 1).unwrap();
         assert_eq!(date.unnormalized_year(), 0);
 
-        let date = GregorianNormalizedDate::from_date(9999, 12, 31);
+        let date = GregorianNormalizedDate::from_date(9999, 12, 31).unwrap();
         assert_eq!(date.unnormalized_year(), 9999);
     }
 
     #[test]
     fn test_get_unnormalized_month() {
-        let date = GregorianNormalizedDate::from_date(2000, 3, 1);
+        let date = GregorianNormalizedDate::from_date(2000, 3, 1).unwrap();
         assert_eq!(date.unnormalized_month(), 3);
 
-        let date = GregorianNormalizedDate::from_date(2000, 2, 29);
+        let date = GregorianNormalizedDate::from_date(2000, 2, 29).unwrap();
         assert_eq!(date.unnormalized_month(), 2);
 
-        let date = GregorianNormalizedDate::from_date(2000, 1, 1);
+        let date = GregorianNormalizedDate::from_date(2000, 1, 1).unwrap();
         assert_eq!(date.unnormalized_month(), 1);
 
-        let date = GregorianNormalizedDate::from_date(1999, 12, 31);
+        let date = GregorianNormalizedDate::from_date(1999, 12, 31).unwrap();
         assert_eq!(date.unnormalized_month(), 12);
     }
 
     #[test]
     fn test_add_months() {
-        let mut date = GregorianNormalizedDate::from_date(2000, 3, 1);
+        let mut date = GregorianNormalizedDate::from_date(2000, 3, 1).unwrap();
         let carry = date.add_months(1);
         assert_eq!(carry, 0);
         assert_eq!(date.to_date(), (2000, 4, 1));
 
-        let mut date = GregorianNormalizedDate::from_date(2000, 3, 1);
+        let mut date = GregorianNormalizedDate::from_date(2000, 3, 1).unwrap();
         let carry = date.add_months(12);
         assert_eq!(carry, 0);
         assert_eq!(date.to_date(), (2001, 3, 1));
 
-        let mut date = GregorianNormalizedDate::from_date(2000, 3, 1);
+        let mut date = GregorianNormalizedDate::from_date(2000, 3, 1).unwrap();
         let carry = date.add_months(13);
         assert_eq!(carry, 0);
         assert_eq!(date.to_date(), (2001, 4, 1));
 
-        let mut date = GregorianNormalizedDate::from_date(2000, 3, 1);
+        let mut date = GregorianNormalizedDate::from_date(2000, 3, 1).unwrap();
         let carry = date.add_months(24);
         assert_eq!(carry, 0);
         assert_eq!(date.to_date(), (2002, 3, 1));
 
-        let mut date = GregorianNormalizedDate::from_date(2000, 3, 1);
+        let mut date = GregorianNormalizedDate::from_date(2000, 3, 1).unwrap();
         let carry = date.add_months(25);
         assert_eq!(carry, 0);
         assert_eq!(date.to_date(), (2002, 4, 1));
 
-        let mut date = GregorianNormalizedDate::from_date(2000, 3, 1);
+        let mut date = GregorianNormalizedDate::from_date(2000, 3, 1).unwrap();
         let carry = date.add_months(-1);
         assert_eq!(carry, 0);
         assert_eq!(date.to_date(), (2000, 2, 1));
 
-        let mut date = GregorianNormalizedDate::from_date(2000, 1, 31);
+        let mut date = GregorianNormalizedDate::from_date(2000, 1, 31).unwrap();
         let carry = date.add_months(1);
         assert_eq!(carry, 2);
         assert_eq!(date.to_date(), (2000, 2, 29));
 
-        let mut date = GregorianNormalizedDate::from_date(2001, 1, 31);
+        let mut date = GregorianNormalizedDate::from_date(2001, 1, 31).unwrap();
         let carry = date.add_months(1);
         assert_eq!(carry, 3);
         assert_eq!(date.to_date(), (2001, 2, 28));
@@ -550,7 +570,7 @@ mod tests {
     #[test]
     fn test_add_days() {
         // 2000-03-01, the zero-point of normalized dates.
-        let mut date = GregorianNormalizedDate::from_date(2000, 3, 1);
+        let mut date = GregorianNormalizedDate::from_date(2000, 3, 1).unwrap();
         date.add_days(1).unwrap();
         assert_eq!(date.to_date(), (2000, 3, 2));
         date.add_days(-1).unwrap();
@@ -561,7 +581,7 @@ mod tests {
         assert_eq!(date.to_date(), (2000, 3, 1));
 
         // 1999-03-01, a non-leap year.
-        let mut date = GregorianNormalizedDate::from_date(1999, 3, 1);
+        let mut date = GregorianNormalizedDate::from_date(1999, 3, 1).unwrap();
         date.add_days(1).unwrap();
         assert_eq!(date.to_date(), (1999, 3, 2));
         date.add_days(-1).unwrap();
@@ -571,7 +591,7 @@ mod tests {
         date.add_days(1).unwrap();
         assert_eq!(date.to_date(), (1999, 3, 1));
 
-        let mut date = GregorianNormalizedDate::from_date(2000, 3, 1);
+        let mut date = GregorianNormalizedDate::from_date(2000, 3, 1).unwrap();
         date.add_days(365).unwrap();
         assert_eq!(date.to_date(), (2001, 3, 1));
         date.add_days(-365).unwrap();
@@ -585,46 +605,46 @@ mod tests {
     #[test]
     fn test_is_unnormalized_leap_year() {
         // 2000-03-01, the zero-point of normalized dates.
-        let date = GregorianNormalizedDate::from_date(2000, 3, 1);
+        let date = GregorianNormalizedDate::from_date(2000, 3, 1).unwrap();
         assert!(date.is_unnormalized_leap_year());
 
-        let date = GregorianNormalizedDate::from_date(2000, 2, 29);
+        let date = GregorianNormalizedDate::from_date(2000, 2, 29).unwrap();
         assert!(date.is_unnormalized_leap_year());
 
-        let date = GregorianNormalizedDate::from_date(2000, 3, 2);
+        let date = GregorianNormalizedDate::from_date(2000, 3, 2).unwrap();
         assert!(date.is_unnormalized_leap_year());
 
-        let date = GregorianNormalizedDate::from_date(2000, 1, 1);
+        let date = GregorianNormalizedDate::from_date(2000, 1, 1).unwrap();
         assert!(date.is_unnormalized_leap_year());
 
-        let date = GregorianNormalizedDate::from_date(1999, 12, 31);
+        let date = GregorianNormalizedDate::from_date(1999, 12, 31).unwrap();
         assert!(!date.is_unnormalized_leap_year());
 
-        let date = GregorianNormalizedDate::from_date(2001, 3, 1);
+        let date = GregorianNormalizedDate::from_date(2001, 3, 1).unwrap();
         assert!(!date.is_unnormalized_leap_year());
 
-        let date = GregorianNormalizedDate::from_date(2001, 2, 28);
+        let date = GregorianNormalizedDate::from_date(2001, 2, 28).unwrap();
         assert!(!date.is_unnormalized_leap_year());
 
-        let date = GregorianNormalizedDate::from_date(2001, 3, 2);
+        let date = GregorianNormalizedDate::from_date(2001, 3, 2).unwrap();
         assert!(!date.is_unnormalized_leap_year());
 
-        let date = GregorianNormalizedDate::from_date(2004, 3, 1);
+        let date = GregorianNormalizedDate::from_date(2004, 3, 1).unwrap();
         assert!(date.is_unnormalized_leap_year());
 
-        let date = GregorianNormalizedDate::from_date(2004, 2, 29);
+        let date = GregorianNormalizedDate::from_date(2004, 2, 29).unwrap();
         assert!(date.is_unnormalized_leap_year());
 
-        let date = GregorianNormalizedDate::from_date(2004, 3, 2);
+        let date = GregorianNormalizedDate::from_date(2004, 3, 2).unwrap();
         assert!(date.is_unnormalized_leap_year());
 
-        let date = GregorianNormalizedDate::from_date(1900, 3, 1);
+        let date = GregorianNormalizedDate::from_date(1900, 3, 1).unwrap();
         assert!(!date.is_unnormalized_leap_year());
 
-        let date = GregorianNormalizedDate::from_date(1900, 1, 1);
+        let date = GregorianNormalizedDate::from_date(1900, 1, 1).unwrap();
         assert!(!date.is_unnormalized_leap_year());
 
-        let date = GregorianNormalizedDate::from_date(1899, 12, 31);
+        let date = GregorianNormalizedDate::from_date(1899, 12, 31).unwrap();
         assert!(!date.is_unnormalized_leap_year());
     }
 
