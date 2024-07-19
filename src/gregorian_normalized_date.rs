@@ -23,13 +23,25 @@
 // - 2398-03-01 to 2399-02-28
 // - 2399-03-01 to 2400-02-29
 
+use std::cmp::Ordering;
 use crate::div_rem::ClampedDivRem;
 use num_integer::Integer;
 
+pub(crate) struct OutOfBounds;
+
+impl std::fmt::Debug for OutOfBounds {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("out of bounds")
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct GregorianNormalizedDate {
-    // Number of 400-year cycles since 2000-03-01. We need to support dates from 0000-03-01 to
-    // 9999-02-29; it turns out that 8 bits is enough to represent this, as 400*127 = 50800.
+    // Number of 400-year cycles since 2000-03-01. With 8 bits we can support
+    // 400*127 = 50800 years forward and 400*128 = 51200 years backward. This is
+    // enough for ISO 8601 which normally has a range from year 0000 to 9999.
+    // If/when we need more for some other calendar we can increase the size
+    // later.
     pub(crate) cycle: i8,
     // Number of centuries since the start of the cycle (0-3)
     pub(crate) century: u8,
@@ -75,9 +87,42 @@ fn month_day_from_year_day(year_day: u16) -> (u8, u8) {
 }
 
 impl GregorianNormalizedDate {
-    pub(crate) fn from_day(day: i32) -> Self {
+    // Because a normalized date starts in March, we can't actually represent the entire
+    // minimum year, so we have to add one to prevent January and February from becoming
+    // invalid months on the first year.
+    pub const MIN_YEAR: i32 = 2000 + i8::MIN as i32 * GREGORIAN_CYCLE_YEARS as i32 + 1;
+    pub const MAX_YEAR: i32 = 2000 + (i8::MAX as i32 + 1) * GREGORIAN_CYCLE_YEARS as i32 - 1;
+
+    // Because cycles must be within the range of i8, we have
+    // i8::MIN <= (day-GREGORIAN_NORMALIZED_DATE_OFFSET_DAYS)/GREGORIAN_CYCLE_DAYS < i8::MAX+1
+    // =>
+    // GREGORIAN_NORMALIZED_DATE_OFFSET_DAYS + i8::MIN*GREGORIAN_CYCLE_DAYS <= day
+    // and
+    // day < GREGORIAN_NORMALIZED_DATE_OFFSET_DAYS + (i8::MAX+1)*GREGORIAN_CYCLE_DAYS
+    pub const MIN_FIXED_DAY: i32 = GREGORIAN_NORMALIZED_DATE_OFFSET_DAYS as i32
+        + (i8::MIN as i32) * (GREGORIAN_CYCLE_DAYS as i32);
+    pub const MAX_FIXED_DAY: i32 = GREGORIAN_NORMALIZED_DATE_OFFSET_DAYS as i32
+        + (i8::MAX as i32 + 1) * (GREGORIAN_CYCLE_DAYS as i32)
+        - 1;
+
+    pub(crate) fn new(cycle: i8, century: u8, quadrennium: u8, year: u8, day: u16) -> Self {
+        GregorianNormalizedDate {
+            cycle,
+            century,
+            quadrennium,
+            year,
+            day,
+        }
+    }
+
+    pub(crate) fn from_day(day: i32) -> Option<Self> {
+        if !(Self::MIN_FIXED_DAY..=Self::MAX_FIXED_DAY).contains(&day) {
+            return None;
+        }
+        
         let day = day - GREGORIAN_NORMALIZED_DATE_OFFSET_DAYS as i32;
         let (cycle, days_into_cycle) = day.div_mod_floor(&(GREGORIAN_CYCLE_DAYS as i32));
+        let cycle = cycle as i8;
         let days_into_cycle = days_into_cycle as u32; // 2^18 days per cycle
 
         // The first three centuries of each cycle are normal centuries with 24 leap years and 76 normal years.
@@ -97,13 +142,13 @@ impl GregorianNormalizedDate {
         let (years_into_quadrennium, days_into_year) =
             days_into_quadrennium.clamped_div_rem(GREGORIAN_YEAR_DAYS, 3_u8);
 
-        GregorianNormalizedDate {
-            cycle: cycle as i8,
+        Some(GregorianNormalizedDate {
+            cycle,
             century,
             quadrennium,
             year: years_into_quadrennium,
             day: days_into_year,
-        }
+        })
     }
 
     pub(crate) fn to_day(&self) -> i32 {
@@ -120,11 +165,12 @@ impl GregorianNormalizedDate {
             + GREGORIAN_NORMALIZED_DATE_OFFSET_DAYS as i32
     }
 
-    pub(crate) fn from_date(year: u16, month: u8, day: u8) -> Self {
+    pub(crate) fn from_date(year: i32, month: u8, day: u8) -> Self {
+        assert!((Self::MIN_YEAR..=Self::MAX_YEAR).contains(&year));
         assert!((1..=12).contains(&month));
         assert!((1..=31).contains(&day));
 
-        let mut year = year as i16; // Year will not be greater than 9999.
+        let mut year = year;
         let mut month = month - 1;
         let day = day - 1;
         if month < 2 {
@@ -133,7 +179,7 @@ impl GregorianNormalizedDate {
         }
         month -= 2;
         year -= 2000;
-        let (cycle, years_into_cycle) = year.div_mod_floor(&(GREGORIAN_CYCLE_YEARS as i16));
+        let (cycle, years_into_cycle) = year.div_mod_floor(&(GREGORIAN_CYCLE_YEARS as i32));
         let cycle = cycle as i8; // Cycle will not be greater than 24.
         let years_into_cycle = years_into_cycle as u16; // 2^9 years per cycle
         let (century, years_into_century) =
@@ -185,21 +231,18 @@ impl GregorianNormalizedDate {
         }
     }
 
-    pub(crate) fn unnormalized_year(&self) -> u16 {
-        // Since the normalized year is shifted so that January and February belong
-        // to the previous year, we may get the year -1 here. This is adjusted below,
-        // but we need to take care to keep the year signed until then.
+    pub(crate) fn unnormalized_year(&self) -> i32 {
         let year = 2000
-            + 400 * self.cycle as i16
-            + 100 * self.century as i16
-            + 4 * self.quadrennium as i16
-            + self.year as i16;
+            + 400 * self.cycle as i32
+            + 100 * self.century as i32
+            + 4 * self.quadrennium as i32
+            + self.year as i32;
 
-        (if self.day >= JANUARY_1_DAY_OFFSET {
+        if self.day >= JANUARY_1_DAY_OFFSET {
             year + 1
         } else {
             year
-        }) as u16
+        }
     }
 
     pub(crate) fn unnormalized_month(&self) -> u8 {
@@ -303,30 +346,27 @@ impl GregorianNormalizedDate {
         carry
     }
 
-    pub(crate) fn add_days(&mut self, days: i32) {
-        if days > 0 {
-            self.add_days_forward(days as u32);
-        } else if days != 0 {
-            self.add_days_backward((-days) as u32);
+    pub(crate) fn add_days(&mut self, days: i32) -> Result<(), OutOfBounds> {
+        match days.cmp(&0) {
+            Ordering::Equal => return Ok(()),
+            Ordering::Less => {
+                if self.day as i32 >= -days {
+                    self.day = (self.day as i32 + days) as u16;
+                    return Ok(());
+                }
+            }
+            Ordering::Greater => {
+                let remaining_days_in_year = (self.year_length() - 1) - self.day;
+                if days <= remaining_days_in_year as i32 {
+                    self.day += days as u16;
+                    return Ok(());
+                }
+            }
         }
-    }
 
-    fn add_days_forward(&mut self, days: u32) {
-        // -1 because the last day of the year has 0 remaining days (and the day is zero-based).
-        let remaining_days_in_year = (self.year_length() - 1) - self.day;
-        if days <= remaining_days_in_year as u32 {
-            self.day += days as u16;
-        } else {
-            *self = GregorianNormalizedDate::from_day(self.to_day() + days as i32);
-        }
-    }
-
-    fn add_days_backward(&mut self, days: u32) {
-        if days <= self.day as u32 {
-            self.day -= days as u16;
-        } else {
-            *self = GregorianNormalizedDate::from_day(self.to_day() - days as i32);
-        }
+        let new_day = self.to_day().checked_add(days).ok_or(OutOfBounds)?;
+        *self = GregorianNormalizedDate::from_day(new_day).ok_or(OutOfBounds)?;
+        Ok(())
     }
 
     fn year_length(&self) -> u16 {
@@ -351,6 +391,23 @@ impl GregorianNormalizedDate {
     }
 }
 
+impl PartialOrd for GregorianNormalizedDate {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for GregorianNormalizedDate {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.cycle
+            .cmp(&other.cycle)
+            .then(self.century.cmp(&other.century))
+            .then(self.quadrennium.cmp(&other.quadrennium))
+            .then(self.year.cmp(&other.year))
+            .then(self.day.cmp(&other.day))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -358,7 +415,7 @@ mod tests {
     #[test]
     fn test_gregorian_normalized_date() {
         // 1970-01-01, the zero-point of unix time.
-        let date = GregorianNormalizedDate::from_day(0);
+        let date = GregorianNormalizedDate::from_day(0).unwrap();
         // Because normalized years start in march, the normalized representation will be based on the year 1969.
         // 2000 -1*400 + 3*100 + 17*4 + 1 = 1969.
         assert_eq!(date.cycle, -1);
@@ -494,34 +551,34 @@ mod tests {
     fn test_add_days() {
         // 2000-03-01, the zero-point of normalized dates.
         let mut date = GregorianNormalizedDate::from_date(2000, 3, 1);
-        date.add_days(1);
+        date.add_days(1).unwrap();
         assert_eq!(date.to_date(), (2000, 3, 2));
-        date.add_days(-1);
+        date.add_days(-1).unwrap();
         assert_eq!(date.to_date(), (2000, 3, 1));
-        date.add_days(-1);
+        date.add_days(-1).unwrap();
         assert_eq!(date.to_date(), (2000, 2, 29));
-        date.add_days(1);
+        date.add_days(1).unwrap();
         assert_eq!(date.to_date(), (2000, 3, 1));
 
         // 1999-03-01, a non-leap year.
         let mut date = GregorianNormalizedDate::from_date(1999, 3, 1);
-        date.add_days(1);
+        date.add_days(1).unwrap();
         assert_eq!(date.to_date(), (1999, 3, 2));
-        date.add_days(-1);
+        date.add_days(-1).unwrap();
         assert_eq!(date.to_date(), (1999, 3, 1));
-        date.add_days(-1);
+        date.add_days(-1).unwrap();
         assert_eq!(date.to_date(), (1999, 2, 28));
-        date.add_days(1);
+        date.add_days(1).unwrap();
         assert_eq!(date.to_date(), (1999, 3, 1));
 
         let mut date = GregorianNormalizedDate::from_date(2000, 3, 1);
-        date.add_days(365);
+        date.add_days(365).unwrap();
         assert_eq!(date.to_date(), (2001, 3, 1));
-        date.add_days(-365);
+        date.add_days(-365).unwrap();
         assert_eq!(date.to_date(), (2000, 3, 1));
-        date.add_days(-365);
+        date.add_days(-365).unwrap();
         assert_eq!(date.to_date(), (1999, 3, 2)); // because of leap day we end up on 1999-03-02.
-        date.add_days(365);
+        date.add_days(365).unwrap();
         assert_eq!(date.to_date(), (2000, 3, 1));
     }
 

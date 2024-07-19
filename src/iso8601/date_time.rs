@@ -64,10 +64,14 @@ impl DateTimeWithCarry {
     }
 
     pub fn apply_carry(&self) -> DateTime {
+        self.checked_apply_carry()
+            .expect("applying carry to a DateTime resulted in an out-of-bounds value")
+    }
+    pub fn checked_apply_carry(&self) -> Option<DateTime> {
         let carry = self.1.clone();
         let DateTimeWithCarry(result, carry2) = self.0.add_days(carry.days as i32);
         assert_eq!(carry2.days, 0);
-        result.add_seconds((carry.seconds + carry2.seconds) as i64)
+        result.checked_add_seconds((carry.seconds + carry2.seconds) as i64)
     }
 }
 
@@ -101,6 +105,41 @@ impl Debug for DateTime {
         )
     }
 }
+
+// The maximum fixed day in the range of DateTime. The maximum fixed day occurs on 9999-12-31
+// so this is the number of days between 1970-01-01 and 9999-12-31.
+const MAX_FIXED_DAY: u32 = 2932896;
+
+// The minimum fixed day in the range of DateTime. The minimum fixed day occurs on 0000-01-01
+// so this is the number of days between 1970-01-01 and 0000-01-01.
+const MIN_FIXED_DAY: i32 = -719528;
+
+const MIN_YEAR: u16 = 0;
+const MAX_YEAR: u16 = 9999;
+
+// The minimum of the DateTime represented as a GregorianNormalizedDate. The
+// date 0000-03-01 is exactly 2000/400 = 5 cycles before the GND epoch. However,
+// we want to represent the date 0000-01-01 which is two months before, so we
+// need to go back to the preceding cycle/century etc.
+const MIN_GND: GregorianNormalizedDate = GregorianNormalizedDate {
+    cycle: -6,
+    century: 3,
+    quadrennium: 24,
+    year: 3,
+    day: 306,
+};
+
+// The maximum of the DateTime represented as a GregorianNormalizedDate. The
+// date 10000-03-01 is 8000 years ahead of the GND epoch, which is exactly 20 cycles.
+// However, we want to represent the date 9999-12-31 which is two months before
+// (minus one day).
+const MAX_GND: GregorianNormalizedDate = GregorianNormalizedDate {
+    cycle: 19,
+    century: 3,
+    quadrennium: 24,
+    year: 3,
+    day: 305,
+};
 
 impl DateTime {
     fn pack(
@@ -224,6 +263,8 @@ impl DateTime {
     pub fn year(&self) -> u16 {
         let (_, gnd, _, _) = Self::unpack0(self.w0);
         gnd.unnormalized_year()
+            .try_into()
+            .expect("year is within the range of u16")
     }
 
     pub fn month(&self) -> u8 {
@@ -274,8 +315,16 @@ impl DateTime {
     // adding a month to something that has fallen behind? I'm not sure.
 
     pub fn add_years(&self, years: i16) -> DateTimeWithCarry {
+        self.checked_add_years(years)
+            .expect("adding years to a DateTime resulted in an out-of-bounds value")
+    }
+
+    pub fn checked_add_years(&self, years: i16) -> Option<DateTimeWithCarry> {
         let (precision, mut gnd, second, nanosecond) = Self::unpack0(self.w0);
         let day_carry = gnd.add_years(years);
+        if !is_in_range(&gnd) {
+            return None;
+        }
         let (second, seconds_carry) = self.spill_eod_second_overflow(&gnd, second);
         let w0 = Self::pack0(precision, gnd, second, nanosecond);
         let result = DateTime {
@@ -283,56 +332,82 @@ impl DateTime {
             w1: self.w1,
             chronology: self.chronology.clone(),
         };
-        DateTimeWithCarry(
+        Some(DateTimeWithCarry(
             result,
             Carry {
                 days: day_carry as u32,
                 seconds: seconds_carry as u64,
             },
-        )
+        ))
     }
 
     pub fn add_months(&self, months: i32) -> DateTimeWithCarry {
+        self.checked_add_months(months)
+            .expect("adding months to a DateTime resulted in an out-of-bounds value")
+    }
+
+    pub fn checked_add_months(&self, months: i32) -> Option<DateTimeWithCarry> {
         let (precision, mut gnd, second, nanosecond) = Self::unpack0(self.w0);
         let day_carry = gnd.add_months(months);
+        if !is_in_range(&gnd) {
+            return None;
+        }
         let (second, seconds_carry) = self.spill_eod_second_overflow(&gnd, second);
         let result = DateTime {
             w0: Self::pack0(precision, gnd, second, nanosecond),
             w1: self.w1,
             chronology: self.chronology.clone(),
         };
-        DateTimeWithCarry(
+        Some(DateTimeWithCarry(
             result,
             Carry {
                 days: day_carry as u32,
                 seconds: seconds_carry as u64,
             },
-        )
+        ))
     }
 
     pub fn add_days(&self, days: i32) -> DateTimeWithCarry {
+        self.checked_add_days(days)
+            .expect("adding days to a DateTime resulted in an out-of-bounds value")
+    }
+
+    pub fn checked_add_days(&self, days: i32) -> Option<DateTimeWithCarry> {
         let (precision, mut gnd, second, nanosecond) = Self::unpack0(self.w0);
-        gnd.add_days(days);
+        gnd.add_days(days).ok()?;
+        if !is_in_range(&gnd) {
+            return None;
+        }
         let (second, seconds_carry) = self.spill_eod_second_overflow(&gnd, second);
         let result = DateTime {
             w0: Self::pack0(precision, gnd, second, nanosecond),
             w1: self.w1,
             chronology: self.chronology.clone(),
         };
-        DateTimeWithCarry(
+        Some(DateTimeWithCarry(
             result,
             Carry {
                 days: 0,
                 seconds: seconds_carry as u64,
             },
-        )
+        ))
     }
 
     pub fn add_hours(&self, hours: i32) -> DateTimeWithCarry {
-        self.add_minutes(hours as i64 * MINUTES_PER_HOUR as i64)
+        self.checked_add_hours(hours)
+            .expect("adding hours to a DateTime resulted in an out-of-bounds value")
+    }
+
+    pub fn checked_add_hours(&self, hours: i32) -> Option<DateTimeWithCarry> {
+        self.checked_add_minutes(hours as i64 * MINUTES_PER_HOUR as i64)
     }
 
     pub fn add_minutes(&self, minutes: i64) -> DateTimeWithCarry {
+        self.checked_add_minutes(minutes)
+            .expect("adding minutes to a DateTime resulted in an out-of-bounds value")
+    }
+
+    pub fn checked_add_minutes(&self, minutes: i64) -> Option<DateTimeWithCarry> {
         let (precision, mut gnd, second_of_day, nanosecond) = Self::unpack0(self.w0);
 
         // We can't easily determine the number of seconds to add since some minutes are
@@ -345,7 +420,10 @@ impl DateTime {
         let (day_delta, minute) =
             (minute as i64 + minutes).div_mod_floor(&(MINUTES_PER_DAY as i64));
         let (day_delta, minute) = (day_delta as i32, minute as u16);
-        gnd.add_days(day_delta);
+        gnd.add_days(day_delta).ok()?;
+        if !is_in_range(&gnd) {
+            return None;
+        }
 
         let (seconds_into_day, seconds_carry) = if minute < MINUTES_PER_DAY - 1 {
             // Not the last minute of the day. We know that it's 60 seconds long.
@@ -373,26 +451,31 @@ impl DateTime {
             w1: self.w1,
             chronology: self.chronology.clone(),
         };
-        DateTimeWithCarry(
+        Some(DateTimeWithCarry(
             result,
             Carry {
                 days: 0,
                 seconds: seconds_carry as u64,
             },
-        )
+        ))
     }
 
     pub fn add_seconds(&self, seconds: i64) -> Self {
+        self.checked_add_seconds(seconds)
+            .expect("adding seconds to a DateTime resulted in overflow")
+    }
+
+    pub fn checked_add_seconds(&self, seconds: i64) -> Option<Self> {
         let (precision, gnd, second, nanosecond) = Self::unpack0(self.w0);
         let instant = self.to_second_instant(gnd, second);
-        let (gnd, second) =
-            Self::from_second_instant(instant + DurationS64::new(seconds), &self.chronology);
+        let instant = instant.checked_add(DurationS64::new(seconds))?;
+        let (gnd, second) = Self::from_second_instant(instant, &self.chronology)?;
         let w0 = Self::pack0(precision, gnd, second, nanosecond);
-        DateTime {
+        Some(DateTime {
             w0,
             w1: self.w1,
             chronology: self.chronology.clone(),
-        }
+        })
     }
 
     #[allow(clippy::wrong_self_convention)]
@@ -425,10 +508,13 @@ impl DateTime {
         InstantS64::from_ticks_since_epoch(seconds_since_epoch)
     }
 
+    // Returns the GregorianNormalizedDate and second component of the DateTime that corresponds to
+    // the given Instant. The second component is the number of seconds since midnight.
+    // If date cannot be represented within the range of DateTime, None is returned.
     fn from_second_instant(
         instant: InstantS64,
         chronology: &Chronology,
-    ) -> (GregorianNormalizedDate, u32) {
+    ) -> Option<(GregorianNormalizedDate, u32)> {
         // TODO handle leap-second overshoot on the last day of the segment; see add_seconds code.
         // TODO leap-second smearing
         let leap_second_chronology = chronology.leap_seconds();
@@ -452,9 +538,15 @@ impl DateTime {
                 let seconds_past_segment =
                     (instant - last_segment.end_instant().into()).ticks() as u64;
                 let (days, second) = seconds_past_segment.div_rem(&(SECONDS_PER_DAY as u64));
-                let (days, second) = (days as u32, second as u32);
-                let gnd = GregorianNormalizedDate::from_day((last_segment.end_day() + days) as i32);
-                (gnd, second)
+                let second = second as u32;
+                let fixed_day = (last_segment.end_day() as u64).checked_add(days)?;
+                if fixed_day > MAX_FIXED_DAY as u64 {
+                    return None;
+                }
+                let gnd = GregorianNormalizedDate::from_day(fixed_day as i32).expect(
+                    "The number of days since the epoch is within the range of GregorianNormalizedDate",
+                );
+                Some((gnd, second))
             }
             SegmentLookupResult::In(segment) => {
                 let seconds_into_segment = (instant - segment.start_instant.into()).ticks() as u64;
@@ -473,8 +565,13 @@ impl DateTime {
                     second += SECONDS_PER_DAY;
                 }
 
-                let gnd = GregorianNormalizedDate::from_day((segment.start_day + days) as i32);
-                (gnd, second)
+                let fixed_day = segment
+                    .start_day
+                    .checked_add(days)
+                    .expect("No leap-second segment is outside of the range of an u32 day");
+                let gnd = GregorianNormalizedDate::from_day(fixed_day as i32)
+                    .expect("The number of days since the epoch is within the range of GregorianNormalizedDate");
+                Some((gnd, second))
             }
             SegmentLookupResult::BeforeFirst(first_segment) => {
                 let seconds_until_first_segment =
@@ -482,15 +579,20 @@ impl DateTime {
                 // When seconds_until_first_segment is 1, we want to end up subtracting 1 day and
                 // setting the second to 86399. Simply dividing by SECONDS_PER_DAY will give us 0 days.
                 // It's essentially a division that rounds up.
-                let (days, second) = seconds_until_first_segment.div_rem(&(SECONDS_PER_DAY as u64));
-                let (mut days, mut second) = (days as u32, second as u32);
+                let (mut days, second) =
+                    seconds_until_first_segment.div_rem(&(SECONDS_PER_DAY as u64));
+                let mut second = second as u32;
                 if second != 0 {
                     days += 1;
                     second = SECONDS_PER_DAY - second;
                 }
-                let gnd =
-                    GregorianNormalizedDate::from_day(first_segment.start_day as i32 - days as i32);
-                (gnd, second)
+                let fixed_day = first_segment.start_day as i64 - days as i64;
+                if fixed_day < MIN_FIXED_DAY as i64 {
+                    return None;
+                }
+                let gnd = GregorianNormalizedDate::from_day(fixed_day as i32)
+                    .expect("The number of days since the epoch is within the range of GregorianNormalizedDate");
+                Some((gnd, second))
             }
         }
     }
@@ -518,6 +620,10 @@ impl DateTime {
             (second, 0)
         }
     }
+}
+
+fn is_in_range(gnd: &GregorianNormalizedDate) -> bool {
+    (MIN_GND..=MAX_GND).contains(gnd)
 }
 
 #[cfg(test)]
@@ -722,6 +828,67 @@ mod tests {
     }
 
     #[test]
+    fn add_years_bounds_checking() {
+        // Go to the last year of the range.
+        let date_time = DateTime::builder()
+            .year(9998)
+            .month(1)
+            .day(1)
+            .hour(0)
+            .minute(0)
+            .second(0)
+            .build();
+        let date_time = date_time.add_years(1).unwrap();
+        assert_eq!(date_time.year(), 9999);
+        assert_eq!(date_time.month(), 1);
+        assert_eq!(date_time.day(), 1);
+        assert_eq!(date_time.hour(), 0);
+        assert_eq!(date_time.minute(), 0);
+        assert_eq!(date_time.second(), 0);
+
+        // Try to go beyond the last year of the range.
+        let date_time = DateTime::builder()
+            .year(9999)
+            .month(1)
+            .day(1)
+            .hour(0)
+            .minute(0)
+            .second(0)
+            .build();
+        let date_time = date_time.checked_add_years(1);
+        assert!(date_time.is_none());
+
+        // Go to the first year of the range.
+        let date_time = DateTime::builder()
+            .year(1)
+            .month(1)
+            .day(1)
+            .hour(0)
+            .minute(0)
+            .second(0)
+            .build();
+        let date_time = date_time.add_years(-1).unwrap();
+        assert_eq!(date_time.year(), 0);
+        assert_eq!(date_time.month(), 1);
+        assert_eq!(date_time.day(), 1);
+        assert_eq!(date_time.hour(), 0);
+        assert_eq!(date_time.minute(), 0);
+        assert_eq!(date_time.second(), 0);
+
+        // Try to go beyond the first year of the range.
+        let date_time = DateTime::builder()
+            .year(0)
+            .month(1)
+            .day(1)
+            .hour(0)
+            .minute(0)
+            .second(0)
+            .build();
+        let date_time = date_time.checked_add_years(-1);
+        assert!(date_time.is_none());
+    }
+
+    #[test]
     fn add_months() {
         let date_time = DateTime::builder()
             .year(2000)
@@ -789,6 +956,273 @@ mod tests {
         assert_eq!(date_time.hour(), 0);
         assert_eq!(date_time.minute(), 0);
         assert_eq!(date_time.second(), 0);
+
+        // Go to the last month of the range of DateTime.
+        let date_time = DateTime::builder()
+            .year(9999)
+            .month(11)
+            .day(1)
+            .hour(0)
+            .minute(0)
+            .second(0)
+            .build();
+        let date_time = date_time.add_months(1).unwrap();
+        assert_eq!(date_time.year(), 9999);
+        assert_eq!(date_time.month(), 12);
+        assert_eq!(date_time.day(), 1);
+        assert_eq!(date_time.hour(), 0);
+        assert_eq!(date_time.minute(), 0);
+        assert_eq!(date_time.second(), 0);
+
+        // Try to go beyond the last month of the range of DateTime.
+        let date_time = DateTime::builder()
+            .year(9999)
+            .month(12)
+            .day(1)
+            .hour(0)
+            .minute(0)
+            .second(0)
+            .build();
+        assert!(date_time.checked_add_months(1).is_none());
+
+        // Go to the first month of the range of DateTime.
+        let date_time = DateTime::builder()
+            .year(0)
+            .month(2)
+            .day(1)
+            .hour(0)
+            .minute(0)
+            .second(0)
+            .build();
+        let date_time = date_time.add_months(-1).unwrap();
+        assert_eq!(date_time.year(), 0);
+        assert_eq!(date_time.month(), 1);
+        assert_eq!(date_time.day(), 1);
+        assert_eq!(date_time.hour(), 0);
+        assert_eq!(date_time.minute(), 0);
+        assert_eq!(date_time.second(), 0);
+
+        // Try to go beyond the first month of the range of DateTime.
+        let date_time = DateTime::builder()
+            .year(0)
+            .month(1)
+            .day(1)
+            .hour(0)
+            .minute(0)
+            .second(0)
+            .build();
+        assert!(date_time.checked_add_months(-1).is_none());
+
+        // Go from the beginning of the range to the end of the range.
+        let date_time = DateTime::builder()
+            .year(0)
+            .month(1)
+            .day(1)
+            .hour(0)
+            .minute(0)
+            .second(0)
+            .build();
+        let date_time = date_time.add_months(9999 * 12 + 11).unwrap();
+        assert_eq!(date_time.year(), 9999);
+        assert_eq!(date_time.month(), 12);
+        assert_eq!(date_time.day(), 1);
+        assert_eq!(date_time.hour(), 0);
+        assert_eq!(date_time.minute(), 0);
+        assert_eq!(date_time.second(), 0);
+
+        // Go from the end of the range to the beginning of the range.
+        let date_time = DateTime::builder()
+            .year(9999)
+            .month(12)
+            .day(1)
+            .hour(0)
+            .minute(0)
+            .second(0)
+            .build();
+        let date_time = date_time.add_months(-9999 * 12 - 11).unwrap();
+        assert_eq!(date_time.year(), 0);
+        assert_eq!(date_time.month(), 1);
+        assert_eq!(date_time.day(), 1);
+        assert_eq!(date_time.hour(), 0);
+        assert_eq!(date_time.minute(), 0);
+        assert_eq!(date_time.second(), 0);
+    }
+
+    #[test]
+    fn add_days() {
+        // Add 0 days.
+        let date_time = DateTime::builder()
+            .year(2000)
+            .month(3)
+            .day(1)
+            .hour(0)
+            .minute(0)
+            .second(0)
+            .build();
+        let date_time = date_time.add_days(0).unwrap();
+        assert_eq!(date_time.year(), 2000);
+        assert_eq!(date_time.month(), 3);
+        assert_eq!(date_time.day(), 1);
+        assert_eq!(date_time.hour(), 0);
+        assert_eq!(date_time.minute(), 0);
+        assert_eq!(date_time.second(), 0);
+
+        // Add a day to epoch time.
+        let date_time = DateTime::builder()
+            .year(2000)
+            .month(3)
+            .day(1)
+            .hour(0)
+            .minute(0)
+            .second(0)
+            .build();
+
+        let date_time = date_time.add_days(1).unwrap();
+        assert_eq!(date_time.year(), 2000);
+        assert_eq!(date_time.month(), 3);
+        assert_eq!(date_time.day(), 2);
+        assert_eq!(date_time.hour(), 0);
+        assert_eq!(date_time.minute(), 0);
+        assert_eq!(date_time.second(), 0);
+
+        // Reverse.
+        let date_time = date_time.add_days(-1).unwrap();
+        assert_eq!(date_time.year(), 2000);
+        assert_eq!(date_time.month(), 3);
+        assert_eq!(date_time.day(), 1);
+        assert_eq!(date_time.hour(), 0);
+        assert_eq!(date_time.minute(), 0);
+        assert_eq!(date_time.second(), 0);
+
+        // Reverse to before epoch time.
+        let date_time = date_time.add_days(-1).unwrap();
+        assert_eq!(date_time.year(), 2000);
+        assert_eq!(date_time.month(), 2);
+        assert_eq!(date_time.day(), 29);
+        assert_eq!(date_time.hour(), 0);
+        assert_eq!(date_time.minute(), 0);
+        assert_eq!(date_time.second(), 0);
+
+        // Go back forward to epoch time.
+        let date_time = date_time.add_days(1).unwrap();
+        assert_eq!(date_time.year(), 2000);
+        assert_eq!(date_time.month(), 3);
+        assert_eq!(date_time.day(), 1);
+        assert_eq!(date_time.hour(), 0);
+        assert_eq!(date_time.minute(), 0);
+        assert_eq!(date_time.second(), 0);
+
+        // Go to the last day of the range of DateTime.
+        let date_time = DateTime::builder()
+            .year(9999)
+            .month(12)
+            .day(30)
+            .hour(0)
+            .minute(0)
+            .second(0)
+            .build();
+        let date_time = date_time.add_days(1).unwrap();
+        assert_eq!(date_time.year(), 9999);
+        assert_eq!(date_time.month(), 12);
+        assert_eq!(date_time.day(), 31);
+        assert_eq!(date_time.hour(), 0);
+        assert_eq!(date_time.minute(), 0);
+        assert_eq!(date_time.second(), 0);
+
+        // Try to go beyond the last day of the range of DateTime.
+        let date_time = DateTime::builder()
+            .year(9999)
+            .month(12)
+            .day(31)
+            .hour(0)
+            .minute(0)
+            .second(0)
+            .build();
+        assert!(date_time.checked_add_days(1).is_none());
+
+        // Go to the first day of the range of DateTime.
+        let date_time = DateTime::builder()
+            .year(0)
+            .month(1)
+            .day(2)
+            .hour(0)
+            .minute(0)
+            .second(0)
+            .build();
+        let date_time = date_time.add_days(-1).unwrap();
+        assert_eq!(date_time.year(), 0);
+        assert_eq!(date_time.month(), 1);
+        assert_eq!(date_time.day(), 1);
+        assert_eq!(date_time.hour(), 0);
+        assert_eq!(date_time.minute(), 0);
+        assert_eq!(date_time.second(), 0);
+
+        // Try to go beyond the first day of the range of DateTime.
+        let date_time = DateTime::builder()
+            .year(0)
+            .month(1)
+            .day(1)
+            .hour(0)
+            .minute(0)
+            .second(0)
+            .build();
+        assert!(date_time.checked_add_days(-1).is_none());
+
+        // Go from the beginning of the range to the end of the range.
+        let date_time = DateTime::builder()
+            .year(0)
+            .month(1)
+            .day(1)
+            .hour(0)
+            .minute(0)
+            .second(0)
+            .build();
+        let date_time = date_time.add_days(25 * 146097 - 1).unwrap(); // 10000 years = 25 cycles
+        assert_eq!(date_time.year(), 9999);
+        assert_eq!(date_time.month(), 12);
+        assert_eq!(date_time.day(), 31);
+        assert_eq!(date_time.hour(), 0);
+        assert_eq!(date_time.minute(), 0);
+        assert_eq!(date_time.second(), 0);
+
+        // Add the maximum number of days to the end of the range.
+        let date = DateTime::builder()
+            .year(9999)
+            .month(12)
+            .day(31)
+            .hour(0)
+            .minute(0)
+            .second(0)
+            .build();
+        assert!(date.checked_add_days(i32::MAX).is_none());
+
+        // Go to the last in-bounds date of the backing GregorianNormalizedDate.
+        // This will be out of bounds for the DateTime but should generate a valid
+        // GregorianNormalizedDate internally.
+        let date = DateTime::builder()
+            .year(1970)
+            .month(1)
+            .day(1)
+            .hour(0)
+            .minute(0)
+            .second(0)
+            .build();
+        assert!(date
+            .checked_add_days(GregorianNormalizedDate::MAX_FIXED_DAY)
+            .is_none());
+
+        // Go out of bounds on the high end of the backing GregorianNormalizedDate.
+        let date = DateTime::builder()
+            .year(1970)
+            .month(1)
+            .day(1)
+            .hour(0)
+            .minute(0)
+            .second(0)
+            .build();
+        assert!(date
+            .checked_add_days(GregorianNormalizedDate::MAX_FIXED_DAY + 1)
+            .is_none());
     }
 
     #[test]
@@ -932,6 +1366,62 @@ mod tests {
         assert_eq!(date_time.hour(), 23);
         assert_eq!(date_time.minute(), 59);
         assert_eq!(date_time.second(), 59);
+
+        // Go to the last hour of the DateTime range.
+        let date_time = DateTime::builder()
+            .year(9999)
+            .month(12)
+            .day(31)
+            .hour(22)
+            .minute(0)
+            .second(0)
+            .build();
+        let date_time = date_time.add_hours(1).unwrap();
+        assert_eq!(date_time.year(), 9999);
+        assert_eq!(date_time.month(), 12);
+        assert_eq!(date_time.day(), 31);
+        assert_eq!(date_time.hour(), 23);
+        assert_eq!(date_time.minute(), 0);
+        assert_eq!(date_time.second(), 0);
+
+        // Go out of bounds at the end of the DateTime range.
+        let date_time = DateTime::builder()
+            .year(9999)
+            .month(12)
+            .day(31)
+            .hour(23)
+            .minute(0)
+            .second(0)
+            .build();
+        assert!(date_time.checked_add_hours(1).is_none());
+
+        // Go to the first hour of the DateTime range.
+        let date_time = DateTime::builder()
+            .year(0)
+            .month(1)
+            .day(1)
+            .hour(1)
+            .minute(0)
+            .second(0)
+            .build();
+        let date_time = date_time.add_hours(-1).unwrap();
+        assert_eq!(date_time.year(), 0);
+        assert_eq!(date_time.month(), 1);
+        assert_eq!(date_time.day(), 1);
+        assert_eq!(date_time.hour(), 0);
+        assert_eq!(date_time.minute(), 0);
+        assert_eq!(date_time.second(), 0);
+
+        // Go out of bounds at the beginning of the DateTime range.
+        let date_time = DateTime::builder()
+            .year(0)
+            .month(1)
+            .day(1)
+            .hour(0)
+            .minute(0)
+            .second(0)
+            .build();
+        assert!(date_time.checked_add_hours(-1).is_none());
     }
 
     #[test]
@@ -1076,6 +1566,88 @@ mod tests {
         assert_eq!(date_time.hour(), 23);
         assert_eq!(date_time.minute(), 59);
         assert_eq!(date_time.second(), 59);
+
+        // Go to the last in-bounds minute at the end of the range of the datetime.
+        let date_time = DateTime::builder()
+            .year(9999)
+            .month(12)
+            .day(31)
+            .hour(23)
+            .minute(58)
+            .second(0)
+            .build();
+        let date_time = date_time.add_minutes(1).unwrap();
+        assert_eq!(date_time.year(), 9999);
+        assert_eq!(date_time.month(), 12);
+        assert_eq!(date_time.day(), 31);
+        assert_eq!(date_time.hour(), 23);
+        assert_eq!(date_time.minute(), 59);
+        assert_eq!(date_time.second(), 0);
+
+        // Go out of bounds at the end of the DateTime range.
+        let date_time = DateTime::builder()
+            .year(9999)
+            .month(12)
+            .day(31)
+            .hour(23)
+            .minute(59)
+            .second(0)
+            .build();
+        assert!(date_time.checked_add_minutes(1).is_none());
+
+        // Go to the first in-bounds minute at the start of the range of the datetime.
+        let date_time = DateTime::builder()
+            .year(1)
+            .month(1)
+            .day(1)
+            .hour(0)
+            .minute(1)
+            .second(0)
+            .build();
+        let date_time = date_time.add_minutes(-1).unwrap();
+        assert_eq!(date_time.year(), 1);
+        assert_eq!(date_time.month(), 1);
+        assert_eq!(date_time.day(), 1);
+        assert_eq!(date_time.hour(), 0);
+        assert_eq!(date_time.minute(), 0);
+        assert_eq!(date_time.second(), 0);
+
+        // Go out of bounds at the start of the DateTime range.
+        let date_time = DateTime::builder()
+            .year(0)
+            .month(1)
+            .day(1)
+            .hour(0)
+            .minute(0)
+            .second(0)
+            .build();
+        assert!(date_time.checked_add_minutes(-1).is_none());
+
+        // Go to the last minute of the backing GregorianNormalizedDate. This
+        // will be out of bounds for the DateTime but should generate a valid
+        // GregorianNormalizedDate internally.
+        let date_time = DateTime::builder()
+            .year(1970)
+            .month(1)
+            .day(1)
+            .hour(0)
+            .minute(0)
+            .second(0)
+            .build();
+        assert!(date_time.checked_add_minutes(
+            (GregorianNormalizedDate::MAX_FIXED_DAY as i64 + 1)*24*60-1).is_none());
+
+        // Go out of bounds on the high end of the backing GregorianNormalizedDate.
+        let date_time = DateTime::builder()
+            .year(1970)
+            .month(1)
+            .day(1)
+            .hour(0)
+            .minute(0)
+            .second(0)
+            .build();
+        assert!(date_time.checked_add_minutes(
+            (GregorianNormalizedDate::MAX_FIXED_DAY as i64 + 1)*24*60).is_none());
     }
 
     #[test]
@@ -1256,5 +1828,121 @@ mod tests {
         assert_eq!(date_time.hour(), 0);
         assert_eq!(date_time.minute(), 0);
         assert_eq!(date_time.second(), 0);
+
+        // Go to the last in-bounds second at the end of the range of the datetime.
+        let date_time = DateTime::builder()
+            .year(9999)
+            .month(12)
+            .day(31)
+            .hour(23)
+            .minute(59)
+            .second(58)
+            .build();
+        let date_time = date_time.add_seconds(1);
+        assert_eq!(date_time.year(), 9999);
+        assert_eq!(date_time.month(), 12);
+        assert_eq!(date_time.day(), 31);
+        assert_eq!(date_time.hour(), 23);
+        assert_eq!(date_time.minute(), 59);
+        assert_eq!(date_time.second(), 59);
+
+        // Go out of bounds at the end of the range of the datetime.
+        let date_time = DateTime::builder()
+            .year(9999)
+            .month(12)
+            .day(31)
+            .hour(23)
+            .minute(59)
+            .second(59)
+            .build();
+        assert!(date_time.checked_add_seconds(1).is_none());
+
+        // Go to the first in-bounds second at the start of the range of the datetime.
+        let date_time = DateTime::builder()
+            .year(0)
+            .month(1)
+            .day(1)
+            .hour(0)
+            .minute(0)
+            .second(1)
+            .build();
+        let date_time = date_time.add_seconds(-1);
+        assert_eq!(date_time.year(), 0);
+        assert_eq!(date_time.month(), 1);
+        assert_eq!(date_time.day(), 1);
+        assert_eq!(date_time.hour(), 0);
+        assert_eq!(date_time.minute(), 0);
+        assert_eq!(date_time.second(), 0);
+
+        // Go out of bounds at the start of the range of the datetime.
+        let date_time = DateTime::builder()
+            .year(0)
+            .month(1)
+            .day(1)
+            .hour(0)
+            .minute(0)
+            .second(0)
+            .build();
+        assert!(date_time.checked_add_seconds(-1).is_none());
+
+        // Go from the low bound to the high.
+        let date_time = DateTime::builder()
+            .year(0)
+            .month(1)
+            .day(1)
+            .hour(0)
+            .minute(0)
+            .second(0)
+            .build();
+        // 3652424 days
+        // = 3652424*86400 + 27 = 315569433627 seconds.
+        //
+        // 315569433627 + 23*3600 + 59*60 + 59 = 315569520026
+        let date_time = date_time.add_seconds(315_569_520_026);
+        assert_eq!(date_time.year(), 9999);
+        assert_eq!(date_time.month(), 12);
+        assert_eq!(date_time.day(), 31);
+        assert_eq!(date_time.hour(), 23);
+        assert_eq!(date_time.minute(), 59);
+        assert_eq!(date_time.second(), 59);
+
+        // Go to from the low bound to one second past the high bound.
+        let date_time = DateTime::builder()
+            .year(0)
+            .month(1)
+            .day(1)
+            .hour(0)
+            .minute(0)
+            .second(0)
+            .build();
+        assert!(date_time.checked_add_seconds(315_569_520_027).is_none());
+
+        // Go from the high bound to the low.
+        let date_time = DateTime::builder()
+            .year(9999)
+            .month(12)
+            .day(31)
+            .hour(23)
+            .minute(59)
+            .second(59)
+            .build();
+        let date_time = date_time.add_seconds(-315_569_520_026);
+        assert_eq!(date_time.year(), 0);
+        assert_eq!(date_time.month(), 1);
+        assert_eq!(date_time.day(), 1);
+        assert_eq!(date_time.hour(), 0);
+        assert_eq!(date_time.minute(), 0);
+        assert_eq!(date_time.second(), 0);
+
+        // Go from the high bound to one second before the low bound.
+        let date_time = DateTime::builder()
+            .year(9999)
+            .month(12)
+            .day(31)
+            .hour(23)
+            .minute(59)
+            .second(59)
+            .build();
+        assert!(date_time.checked_add_seconds(-315_569_520_027).is_none());
     }
 }
