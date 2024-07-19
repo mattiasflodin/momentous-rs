@@ -147,7 +147,7 @@ impl DateTimeBuilder {
         let offset_hour = self.offset_hour.unwrap_or(0);
         let offset_minute = self.offset_minute.unwrap_or(0);
         // TODO instant, ensure datetime validity, set offset from chronology (or smth - should we even have those members?)
-        let gnd = GregorianNormalizedDate::from_date(year, month, day);
+        let gnd = GregorianNormalizedDate::from_date(year as i32, month, day);
         let second = hour as u32 * 3600 + minute as u32 * 60 + second as u32;
         let nanosecond =
             millisecond as u32 * 1_000_000 + microsecond as u32 * 1_000 + nanosecond as u32;

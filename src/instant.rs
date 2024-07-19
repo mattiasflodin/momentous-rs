@@ -142,6 +142,12 @@ impl<T: Tick, S: Scale> Instant<T, S> {
     pub fn ticks_since_epoch(&self) -> T {
         self.ticks
     }
+
+    pub fn checked_add(&self, rhs: Duration<T, S>) -> Option<Self> {
+        Some(Self::from_ticks_since_epoch(
+            self.ticks.checked_add(&rhs.ticks())?,
+        ))
+    }
 }
 
 impl<T: Tick, S: Scale> Sub for Instant<T, S> {
@@ -160,11 +166,7 @@ impl<T: Tick, S: Scale> Add<Duration<T, S>> for Instant<T, S> {
     type Output = Self;
 
     fn add(self, rhs: Duration<T, S>) -> Self::Output {
-        Self::from_ticks_since_epoch(
-            self.ticks
-                .checked_add(&rhs.ticks())
-                .expect("instant addition overflow"),
-        )
+        self.checked_add(rhs).expect("instant addition overflow")
     }
 }
 
