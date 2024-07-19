@@ -113,6 +113,26 @@ fn is_leap_year(century: u8, quadrennium: u8, year: u8) -> bool {
     year == 3 && !(quadrennium == 24 && century != 3)
 }
 
+fn decompose_day_of_cycle(days: u32) -> (u8, u8, u8, u16) {
+    // The first three centuries of each cycle are normal centuries with 24 leap years and 76 normal years.
+    // The fourth century is a leap century with 25 leap years and 75 normal years, so it has one extra leap day
+    // at the end.
+    let (century, days_into_century) = days.clamped_div_rem(GREGORIAN_CENTURY_DAYS as u32, 3_u8);
+    let days_into_century = days_into_century as u16; // 2^16 days per century
+
+    // Each quadrennium has 3 normal years and 1 leap year, so it has one extra leap day at the end. The last
+    // quadrennium of the first three centuries are exceptional since they lack the leap day, so they have one
+    // day less. This means we can do a normal division (without clamped quotient).
+    let (quadrennium, days_into_quadrennium) =
+        days_into_century.div_rem(&GREGORIAN_QUADRENNIUM_DAYS);
+    let quadrennium = quadrennium as u8;
+
+    let (years_into_quadrennium, days_into_year) =
+        days_into_quadrennium.clamped_div_rem(GREGORIAN_YEAR_DAYS, 3_u8);
+
+    (century, quadrennium, years_into_quadrennium, days_into_year)
+}
+
 impl GregorianNormalizedDate {
     // Because a normalized date starts in March, we can't actually represent the entire
     // minimum year, so we have to add one to prevent January and February from becoming
@@ -149,32 +169,14 @@ impl GregorianNormalizedDate {
 
         let day = day - GREGORIAN_NORMALIZED_DATE_OFFSET_DAYS as i32;
         let (cycle, days_into_cycle) = day.div_mod_floor(&(GREGORIAN_CYCLE_DAYS as i32));
-        let cycle = cycle as i8;
-        let days_into_cycle = days_into_cycle as u32; // 2^18 days per cycle
-
-        // The first three centuries of each cycle are normal centuries with 24 leap years and 76 normal years.
-        // The fourth century is a leap century with 25 leap years and 75 normal years, so it has one extra leap day
-        // at the end.
-        let (century, days_into_century) =
-            days_into_cycle.clamped_div_rem(GREGORIAN_CENTURY_DAYS as u32, 3_u8);
-        let days_into_century = days_into_century as u16; // 2^16 days per century
-
-        // Each quadrennium has 3 normal years and 1 leap year, so it has one extra leap day at the end. The last
-        // quadrennium of the first three centuries are exceptional since they lack the leap day, so they have one
-        // day less. This means we can do a normal division (without clamped quotient).
-        let (quadrennium, days_into_quadrennium) =
-            days_into_century.div_rem(&GREGORIAN_QUADRENNIUM_DAYS);
-        let quadrennium = quadrennium as u8;
-
-        let (years_into_quadrennium, days_into_year) =
-            days_into_quadrennium.clamped_div_rem(GREGORIAN_YEAR_DAYS, 3_u8);
+        let (century, quadrennium, year, day) = decompose_day_of_cycle(days_into_cycle as u32);
 
         Some(GregorianNormalizedDate {
-            cycle,
+            cycle: cycle as i8,
             century,
             quadrennium,
-            year: years_into_quadrennium,
-            day: days_into_year,
+            year,
+            day,
         })
     }
 
@@ -380,25 +382,29 @@ impl GregorianNormalizedDate {
     }
 
     pub(crate) fn add_days(&mut self, days: i32) -> Result<(), OutOfBounds> {
-        match days.cmp(&0) {
-            Ordering::Equal => return Ok(()),
-            Ordering::Less => {
-                if self.day as i32 >= -days {
-                    self.day = (self.day as i32 + days) as u16;
-                    return Ok(());
-                }
-            }
-            Ordering::Greater => {
-                let remaining_days_in_year = (self.year_length() - 1) - self.day;
-                if days <= remaining_days_in_year as i32 {
-                    self.day += days as u16;
-                    return Ok(());
-                }
-            }
+        let day = (self.day as i32).checked_add(days).ok_or(OutOfBounds)?;
+        if day >= 0 && day < self.year_length() as i32 {
+            self.day = day as u16;
+            return Ok(());
         }
 
-        let new_day = self.to_day().checked_add(days).ok_or(OutOfBounds)?;
-        *self = GregorianNormalizedDate::from_day(new_day).ok_or(OutOfBounds)?;
+        let century = self.century as i32;
+        let quadrennium = self.quadrennium as i32;
+        let year = self.year as i32;
+        let day = (century * GREGORIAN_CENTURY_DAYS as i32
+            + quadrennium * GREGORIAN_QUADRENNIUM_DAYS as i32
+            + year * GREGORIAN_YEAR_DAYS as i32)
+            .checked_add(day)
+            .ok_or(OutOfBounds)?;
+
+        let (cycles, day) = day.div_mod_floor(&(GREGORIAN_CYCLE_DAYS as i32));
+        let (century, quadrennium, year, day) = decompose_day_of_cycle(day as u32);
+
+        self.cycle = self.cycle.checked_add(cycles as i8).ok_or(OutOfBounds)?;
+        self.century = century;
+        self.quadrennium = quadrennium;
+        self.year = year;
+        self.day = day;
         Ok(())
     }
 
