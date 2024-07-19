@@ -72,7 +72,7 @@ impl DateTimeWithCarry {
 }
 
 /// An ISO 8601 date and time. The range is from 0000-01-01 to 9999-12-31.
-#[derive(Clone)]
+#[derive(Clone, Eq, PartialEq)]
 pub struct DateTime {
     // - P Precision: 13, 4 bits
     // - E cycle: 25 [-1-23], 5 bits
