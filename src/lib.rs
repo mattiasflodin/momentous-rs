@@ -12,7 +12,6 @@ pub mod iso8601;
 mod least_common_width;
 mod period;
 mod scale;
-mod shared_vec_cursor;
 mod slice_cursor;
 mod widen;
 mod zoneinfo;
