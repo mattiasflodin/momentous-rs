@@ -9,7 +9,7 @@
 // complicated, since we have to take into account the extra day in the initial period. By shifting values so
 // that the leap day comes out at the end of each period we can just let the leap days come naturally as an
 // "overflow", without any branches in control flow (other than the implicit branch in a call to min() inside
-// clamped_div_rem. So we pick 2000-03-01 as zero point, right after the last leap day of the preceding cycle.
+// clamped_div_rem). So we pick 2000-03-01 as zero point, right after the last leap day of the preceding cycle.
 // We then have a quadrennium consisting of the "years"
 // - 2000-03-01 to 2001-02-28
 // - 2001-03-01 to 2002-02-28
@@ -253,11 +253,11 @@ impl GregorianNormalizedDate {
             + self.year as i16;
         let mut year = year as u16;
 
-        // NB: shifted so march is first. This way we don't need to care about how leap days
+        // NB: shifted so March is first. This way we don't need to care about how leap days
         // affect the month start since the leap day comes at the end of the year.
         let (mut month, days_into_month) = month_day_from_year_day(self.day);
 
-        // Adjust so march is represented as month 3 instead of month 1, since we want to be based off of the Gregorian new year.
+        // Adjust so March is represented as month 3 instead of month 1, since we want to be based off of the Gregorian new year.
         month += 2;
         if month >= 12 {
             month -= 12;
@@ -296,7 +296,7 @@ impl GregorianNormalizedDate {
 
     pub(crate) fn is_unnormalized_leap_year(&self) -> bool {
         // Leap years are at the end of each period: quadrennium, century and cycle.
-        // However, because of the way we've shifted the year so that it begins in march,
+        // However, because of the way we've shifted the year so that it begins in March,
         // it is only a leap year if the day is 306 (jan 1) or greater. If it is 305 (dec 31)
         // or less, we must subtract one from the current year and check the result of that. This
         // creates complicated code with a lot of special cases and branches. It'll likely be both
@@ -442,8 +442,9 @@ mod tests {
     fn test_gregorian_normalized_date() {
         // 1970-01-01, the zero-point of unix time.
         let date = GregorianNormalizedDate::from_day(0).unwrap();
-        // Because normalized years start in march, the normalized representation will be based on the year 1969.
-        // 2000 -1*400 + 3*100 + 17*4 + 1 = 1969.
+        // Because normalized years start in March, the normalized representation will be
+        // the year 1969.
+        // 2000 - 1*400 + 3*100 + 17*4 + 1 = 1969.
         assert_eq!(date.cycle, -1);
         assert_eq!(date.century, 3);
         assert_eq!(date.quadrennium, 17);
